@@ -10,6 +10,7 @@ import {
   Gauge,
   Heart,
   Lock,
+  LogIn,
   MapPin,
   Medal,
   Menu,
@@ -82,14 +83,21 @@ function useClubData() {
     });
   }, []);
 
-  return data;
+  return { data, setData };
 }
 
 function App() {
-  const data = useClubData();
+  const { data, setData } = useClubData();
   const [activeRoute, setActiveRoute] = useState('todas');
   const [activeDifficulty, setActiveDifficulty] = useState('todas');
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [auth, setAuth] = useState(() => {
+    const saved = localStorage.getItem('ryp-auth');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [authOpen, setAuthOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [notice, setNotice] = useState('');
 
   const filteredRoutes = useMemo(() => {
     return data.routes.filter((route) => {
@@ -103,7 +111,14 @@ function App() {
     <div className="app-shell">
       <Header mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
       <main>
-        <Hero stats={data.stats} routes={data.routes} gallery={data.gallery} events={data.events} />
+        <Hero
+          stats={data.stats}
+          routes={data.routes}
+          gallery={data.gallery}
+          events={data.events}
+          auth={auth}
+          onJoin={() => setAuthOpen(true)}
+        />
         <RoutesMap
           routes={filteredRoutes}
           activeRoute={activeRoute}
@@ -111,14 +126,72 @@ function App() {
           activeDifficulty={activeDifficulty}
           setActiveDifficulty={setActiveDifficulty}
         />
-        <Gallery gallery={data.gallery} />
-        <Bikes bikes={data.bikes} />
+        <Gallery
+          gallery={data.gallery}
+          onUpload={() => {
+            if (!auth) return setAuthOpen(true);
+            setUploadOpen(true);
+          }}
+          onReact={(id) => {
+            setData((current) => ({
+              ...current,
+              gallery: current.gallery.map((photo) => photo.id === id ? { ...photo, reactions: photo.reactions + 1 } : photo)
+            }));
+          }}
+        />
+        <Bikes
+          bikes={data.bikes}
+          onVote={(id) => {
+            setData((current) => ({
+              ...current,
+              bikes: current.bikes.map((bike) => bike.id === id ? { ...bike, votes: bike.votes + 1 } : bike)
+            }));
+          }}
+        />
         <Members members={data.members} />
-        <Events events={data.events} />
+        <Events
+          events={data.events}
+          auth={auth}
+          onAttend={(id) => {
+            if (!auth) return setAuthOpen(true);
+            setData((current) => ({
+              ...current,
+              events: current.events.map((event) => {
+                if (event.id !== id || event.attendees.includes(auth.user.nickname)) return event;
+                return { ...event, attendees: [...event.attendees, auth.user.nickname] };
+              })
+            }));
+          }}
+        />
         <Blog posts={data.posts} />
         <Achievements members={data.members} stats={data.stats} bikes={data.bikes} />
         <AdminPanel />
       </main>
+      {notice && <div className="toast">{notice}</div>}
+      {authOpen && (
+        <AuthModal
+          onClose={() => setAuthOpen(false)}
+          onAuth={(session) => {
+            localStorage.setItem('ryp-auth', JSON.stringify(session));
+            setAuth(session);
+            setAuthOpen(false);
+            setNotice(`Sesion iniciada como ${session.user.nickname}`);
+            setTimeout(() => setNotice(''), 2600);
+          }}
+        />
+      )}
+      {uploadOpen && (
+        <UploadPhotoModal
+          token={auth?.token}
+          onClose={() => setUploadOpen(false)}
+          onUploaded={(photo) => {
+            setData((current) => ({ ...current, gallery: [photo, ...current.gallery] }));
+            setUploadOpen(false);
+            setNotice('Foto subida a la galeria');
+            setTimeout(() => setNotice(''), 2600);
+          }}
+        />
+      )}
       <Footer />
     </div>
   );
@@ -153,7 +226,7 @@ function Header({ mobileOpen, setMobileOpen }) {
   );
 }
 
-function Hero({ stats, routes, gallery, events }) {
+function Hero({ stats, routes, gallery, events, auth, onJoin }) {
   return (
     <section id="inicio" className="hero">
       <div className="hero-media" />
@@ -172,7 +245,9 @@ function Hero({ stats, routes, gallery, events }) {
         <div className="hero-actions">
           <a className="primary-button" href="#rutas">Ver rutas <ChevronRight size={18} /></a>
           <a className="ghost-button" href="#motos">Explorar motos</a>
-          <a className="ghost-button" href="#miembros">Unirme al club</a>
+          <button className="ghost-button" onClick={onJoin}>
+            {auth ? `Hola, ${auth.user.nickname}` : 'Unirme al club'}
+          </button>
         </div>
       </motion.div>
       <div className="stats-strip">
@@ -277,7 +352,7 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
   );
 }
 
-function Gallery({ gallery }) {
+function Gallery({ gallery, onUpload, onReact }) {
   const filters = ['integrante', 'moto', 'evento', 'ubicacion'];
   return (
     <section id="galeria" className="section">
@@ -288,7 +363,7 @@ function Gallery({ gallery }) {
       />
       <div className="filter-row compact">
         {filters.map((filter) => <button className="chip" key={filter}>{filter}</button>)}
-        <button className="primary-button small"><Upload size={16} /> Subir foto</button>
+        <button className="primary-button small" onClick={onUpload}><Upload size={16} /> Subir foto</button>
       </div>
       <div className="gallery-grid">
         {gallery.map((photo, index) => (
@@ -298,7 +373,10 @@ function Gallery({ gallery }) {
               <span>{photo.event}</span>
               <h3>{photo.title}</h3>
               <p>{photo.author} | {photo.location}</p>
-              <div><Heart size={16} /> {photo.reactions} <MessageCircle size={16} /> {photo.comments.length}</div>
+              <div>
+                <button className="inline-action" onClick={() => onReact(photo.id)}><Heart size={16} /> {photo.reactions}</button>
+                <span><MessageCircle size={16} /> {photo.comments.length}</span>
+              </div>
             </div>
           </motion.article>
         ))}
@@ -307,7 +385,7 @@ function Gallery({ gallery }) {
   );
 }
 
-function Bikes({ bikes }) {
+function Bikes({ bikes, onVote }) {
   return (
     <section id="motos" className="section">
       <SectionTitle
@@ -322,7 +400,7 @@ function Bikes({ bikes }) {
             <div className="bike-body">
               <div className="split">
                 <span className="tag">{bike.type}</span>
-                <span className="votes"><Star size={16} /> {bike.votes}</span>
+                <button className="votes action-link" onClick={() => onVote(bike.id)}><Star size={16} /> {bike.votes}</button>
               </div>
               <h3>{bike.brand} {bike.model}</h3>
               <p>{bike.description}</p>
@@ -370,7 +448,7 @@ function Members({ members }) {
   );
 }
 
-function Events({ events }) {
+function Events({ events, auth, onAttend }) {
   return (
     <section id="eventos" className="section event-section">
       <SectionTitle
@@ -379,14 +457,15 @@ function Events({ events }) {
         text="Organiza salidas con punto de encuentro, contador, participantes, recomendaciones y mapa del meetup."
       />
       <div className="event-grid">
-        {events.map((event) => <EventCard event={event} key={event.id} />)}
+        {events.map((event) => <EventCard event={event} auth={auth} onAttend={onAttend} key={event.id} />)}
       </div>
     </section>
   );
 }
 
-function EventCard({ event }) {
+function EventCard({ event, auth, onAttend }) {
   const hours = Math.max(0, Math.ceil((new Date(event.date) - new Date()) / 36e5));
+  const joined = Boolean(auth && event.attendees.includes(auth.user.nickname));
   return (
     <article className="event-card">
       <div className="split">
@@ -399,8 +478,137 @@ function EventCard({ event }) {
       <div className="checklist">
         {event.recommendations.map((item) => <span key={item}><CheckCircle2 size={15} /> {item}</span>)}
       </div>
-      <div className="attendees">{event.attendees.map((item) => <span key={item}>{item[0]}</span>)}</div>
+      <div className="event-footer">
+        <div className="attendees">{event.attendees.map((item) => <span key={item}>{item[0]}</span>)}</div>
+        <button className="primary-button small" onClick={() => onAttend(event.id)} disabled={joined}>
+          {joined ? 'Confirmado' : 'Confirmar asistencia'}
+        </button>
+      </div>
     </article>
+  );
+}
+
+function AuthModal({ onClose, onAuth }) {
+  const [mode, setMode] = useState('login');
+  const [form, setForm] = useState({ name: '', nickname: '', email: 'admin@rapidos.test', password: 'admin123' });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch(`${API}/auth/${mode === 'login' ? 'login' : 'register'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || 'No se pudo autenticar');
+      onAuth(payload);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal title={mode === 'login' ? 'Acceso biker' : 'Registro al club'} onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        {mode === 'register' && (
+          <>
+            <label>Nombre<input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+            <label>Nickname biker<input required value={form.nickname} onChange={(event) => setForm({ ...form, nickname: event.target.value })} /></label>
+          </>
+        )}
+        <label>Email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+        <label>Contrasena<input required type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" disabled={loading} type="submit"><LogIn size={17} /> {loading ? 'Procesando' : 'Entrar'}</button>
+        <button className="text-button" type="button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
+          {mode === 'login' ? 'Crear cuenta nueva' : 'Ya tengo cuenta'}
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function UploadPhotoModal({ token, onClose, onUploaded }) {
+  const [form, setForm] = useState({ title: '', moto: '', event: '', location: '' });
+  const [image, setImage] = useState('');
+  const [preview, setPreview] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  function pickFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Selecciona una imagen valida.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImage(reader.result);
+      setPreview(reader.result);
+      setError('');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!image) return setError('Debes seleccionar una foto.');
+    setLoading(true);
+    setError('');
+    try {
+      const response = await fetch(`${API}/gallery`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ ...form, image })
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.message || 'No se pudo subir la foto');
+      onUploaded(payload);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Modal title="Subir foto de ruta" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <label>Titulo<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+        <label>Foto<input required type="file" accept="image/*" onChange={pickFile} /></label>
+        {preview && <img className="upload-preview" src={preview} alt="Preview de subida" />}
+        <label>Moto<input value={form.moto} onChange={(event) => setForm({ ...form, moto: event.target.value })} /></label>
+        <label>Evento<input value={form.event} onChange={(event) => setForm({ ...form, event: event.target.value })} /></label>
+        <label>Ubicacion<input value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" disabled={loading} type="submit"><Upload size={17} /> {loading ? 'Subiendo' : 'Publicar foto'}</button>
+      </form>
+    </Modal>
+  );
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <div className="modal-panel">
+        <div className="modal-header">
+          <h2>{title}</h2>
+          <button className="icon-button" onClick={onClose} aria-label="Cerrar"><X /></button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
