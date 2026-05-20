@@ -551,6 +551,10 @@ small {
   color: white;
 }
 
+.inline-action.liked {
+  color: #ff243d;
+}
+
 .edit-button {
   width: fit-content;
   margin-top: 0.65rem;

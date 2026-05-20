@@ -316,6 +316,7 @@ export async function createPhoto(body, user) {
     event: body.event || 'Rodada',
     location: body.location || 'Ruta registrada',
     reactions: 0,
+    liked_by: [],
     comments: []
   };
   if (!supabaseEnabled) {
@@ -327,7 +328,7 @@ export async function createPhoto(body, user) {
 }
 
 export async function updatePhoto(id, body) {
-  const { id: _id, created_at: _createdAt, ...next } = body;
+  const { id: _id, created_at: _createdAt, liked_by: _likedBy, reactions: _reactions, comments: _comments, ...next } = body;
   if (next.image) next.image = await uploadDataUrl(next.image, 'gallery');
   if (!supabaseEnabled) {
     const index = db.gallery.findIndex((photo) => photo.id === id);
@@ -376,17 +377,38 @@ export async function commentPhoto(id, body, user) {
   return first(await supabaseRequest('gallery_photos', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: { comments } }));
 }
 
-export async function reactPhoto(id) {
+export async function reactPhoto(id, user) {
+  if (!user?.id) {
+    const error = new Error('Token requerido');
+    error.status = 401;
+    throw error;
+  }
   if (!supabaseEnabled) {
     const photo = db.gallery.find((item) => item.id === id);
     if (!photo) return null;
+    const likedBy = photo.liked_by || [];
+    if (likedBy.includes(user.id)) {
+      const error = new Error('Ya diste like a esta foto');
+      error.status = 409;
+      throw error;
+    }
+    photo.liked_by = [...likedBy, user.id];
     photo.reactions += 1;
     await persistLocalDb();
     return photo;
   }
   const photo = first(await supabaseRequest('gallery_photos', { query: `?select=*&id=eq.${encodeURIComponent(id)}&limit=1` }));
   if (!photo) return null;
-  return first(await supabaseRequest('gallery_photos', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: { reactions: Number(photo.reactions || 0) + 1 } }));
+  const likedBy = photo.liked_by || [];
+  if (likedBy.includes(user.id)) {
+    const error = new Error('Ya diste like a esta foto');
+    error.status = 409;
+    throw error;
+  }
+  return first(await supabaseRequest('gallery_photos', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: {
+    reactions: Number(photo.reactions || 0) + 1,
+    liked_by: [...likedBy, user.id]
+  } }));
 }
 
 export async function createBike(body, user) {

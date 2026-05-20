@@ -106,6 +106,7 @@ export const seed = {
       location: 'Panamericana Sur',
       image: 'https://images.unsplash.com/photo-1558981852-426c6c22a060?auto=format&fit=crop&w=900&q=80',
       reactions: 241,
+      liked_by: [],
       comments: ['Toma brutal', 'Ese reflejo quedo perfecto']
     },
     {
@@ -117,6 +118,7 @@ export const seed = {
       location: 'Cieneguilla',
       image: 'https://images.unsplash.com/photo-1524591652733-73fa1ae7b5ee?auto=format&fit=crop&w=900&q=80',
       reactions: 188,
+      liked_by: [],
       comments: ['Gran rodada', 'La siguiente sera mas larga']
     },
     {
@@ -128,6 +130,7 @@ export const seed = {
       location: 'Clubhouse',
       image: 'https://images.unsplash.com/photo-1609630875171-b1321377ee65?auto=format&fit=crop&w=900&q=80',
       reactions: 319,
+      liked_by: [],
       comments: ['La reina del mes', 'Esas mods se ven finas']
     }
   ],

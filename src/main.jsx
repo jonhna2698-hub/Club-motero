@@ -230,19 +230,18 @@ function App() {
             setUploadOpen(true);
           }}
           onReact={(id) => {
-            sendJson(`/gallery/${id}/react`, { method: 'POST' })
+            if (!auth) {
+              showNotice('Inicia sesion para dar like');
+              return setAuthOpen(true);
+            }
+            sendJson(`/gallery/${id}/react`, { method: 'POST', token: auth.token })
               .then((updatedPhoto) => {
                 setData((current) => ({
                   ...current,
                   gallery: current.gallery.map((photo) => photo.id === id ? updatedPhoto : photo)
                 }));
               })
-              .catch(() => {
-                setData((current) => ({
-                  ...current,
-                  gallery: current.gallery.map((photo) => photo.id === id ? { ...photo, reactions: photo.reactions + 1 } : photo)
-                }));
-              });
+              .catch((error) => showNotice(error.message));
           }}
           onEdit={setEditingPhoto}
           onOpen={setViewingPhoto}
@@ -768,23 +767,27 @@ function Gallery({ gallery, onUpload, onReact, onEdit, onOpen, activeAuth }) {
       </div>
       <div className="gallery-grid">
         {filteredGallery.length === 0 && <EmptyState title="Sin fotos para este filtro" text="Sube una nueva foto o cambia el filtro activo." />}
-        {filteredGallery.map((photo, index) => (
-          <motion.article className={`photo-card span-${index % 3}`} key={photo.id} whileHover={{ y: -8 }}>
-            <button className="photo-open" onClick={() => onOpen(photo)} aria-label={`Abrir ${photo.title}`}>
-              <img src={photo.image} alt={photo.title} loading="lazy" />
-            </button>
-            <div className="photo-info">
-              <span>{photo.event}</span>
-              <h3>{photo.title}</h3>
-              <p>{photo.author} | {photo.location}</p>
-              <div>
-                <button className="inline-action" onClick={() => onReact(photo.id)}><Heart size={16} /> {photo.reactions}</button>
-                <span><MessageCircle size={16} /> {photo.comments.length}</span>
-                {activeAuth && <button className="inline-action" onClick={() => onEdit(photo)}><Edit3 size={16} /> Editar</button>}
+        {filteredGallery.map((photo, index) => {
+          const likedBy = photo.liked_by || [];
+          const liked = Boolean(activeAuth && likedBy.includes(activeAuth.user.id));
+          return (
+            <motion.article className={`photo-card span-${index % 3}`} key={photo.id} whileHover={{ y: -8 }}>
+              <button className="photo-open" onClick={() => onOpen(photo)} aria-label={`Abrir ${photo.title}`}>
+                <img src={photo.image} alt={photo.title} loading="lazy" />
+              </button>
+              <div className="photo-info">
+                <span>{photo.event}</span>
+                <h3>{photo.title}</h3>
+                <p>{photo.author} | {photo.location}</p>
+                <div>
+                  <button className={liked ? 'inline-action liked' : 'inline-action'} onClick={() => onReact(photo.id)}><Heart size={16} /> {photo.reactions}</button>
+                  <span><MessageCircle size={16} /> {photo.comments.length}</span>
+                  {activeAuth && <button className="inline-action" onClick={() => onEdit(photo)}><Edit3 size={16} /> Editar</button>}
+                </div>
               </div>
-            </div>
-          </motion.article>
-        ))}
+            </motion.article>
+          );
+        })}
       </div>
     </section>
   );

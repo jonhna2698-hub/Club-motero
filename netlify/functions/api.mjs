@@ -167,7 +167,7 @@ export default async function handler(request) {
 
     const galleryReact = path.match(/^\/gallery\/([^/]+)\/react$/);
     if (method === 'POST' && galleryReact) {
-      const photo = await reactPhoto(galleryReact[1]);
+      const photo = await reactPhoto(galleryReact[1], requireUser(request));
       return photo ? json(photo) : json({ message: 'Foto no encontrada' }, 404);
     }
 

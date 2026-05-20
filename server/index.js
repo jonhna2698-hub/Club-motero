@@ -148,8 +148,8 @@ app.post('/api/gallery/:id/comments', auth, asyncRoute(async (req, res) => {
   res.status(201).json(photo);
 }));
 
-app.post('/api/gallery/:id/react', asyncRoute(async (req, res) => {
-  const photo = await reactPhoto(req.params.id);
+app.post('/api/gallery/:id/react', auth, asyncRoute(async (req, res) => {
+  const photo = await reactPhoto(req.params.id, req.user);
   if (!photo) return res.status(404).json({ message: 'Foto no encontrada' });
   res.json(photo);
 }));

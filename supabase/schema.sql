@@ -43,6 +43,7 @@ create table if not exists gallery_photos (
   location text default '',
   image text not null,
   reactions integer not null default 0,
+  liked_by jsonb not null default '[]'::jsonb,
   comments jsonb not null default '[]'::jsonb,
   approved boolean not null default true,
   created_at timestamptz not null default now()
@@ -94,6 +95,7 @@ create table if not exists posts (
 
 alter table members add column if not exists description text default '';
 alter table gallery_photos add column if not exists approved boolean not null default true;
+alter table gallery_photos add column if not exists liked_by jsonb not null default '[]'::jsonb;
 alter table posts add column if not exists approved boolean not null default true;
 
 insert into members (id, name, nickname, email, password_hash, role, avatar, joined_at, socials, bike, routes, km)
