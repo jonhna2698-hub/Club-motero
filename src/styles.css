@@ -400,10 +400,11 @@ small {
   display: grid;
   grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
   gap: 1rem;
+  align-items: start;
 }
 
 .map-frame {
-  min-height: 620px;
+  height: clamp(430px, 58vw, 620px);
   overflow: hidden;
   border: 1px solid var(--line);
   background: var(--graphite);
@@ -411,7 +412,7 @@ small {
 
 .leaflet-map {
   width: 100%;
-  height: 620px;
+  height: 100%;
   filter: grayscale(0.7) invert(0.95) hue-rotate(175deg) brightness(0.78) contrast(1.1);
 }
 
@@ -1092,7 +1093,6 @@ small {
 
   .map-frame,
   .leaflet-map {
-    min-height: 430px;
     height: 430px;
   }
 

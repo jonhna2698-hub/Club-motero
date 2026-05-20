@@ -646,6 +646,7 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
       <div className="map-layout">
         <div className="map-frame">
           <MapContainer center={center} zoom={8} scrollWheelZoom className="leaflet-map">
+            <ResizeMap />
             <FitBounds points={routePoints} />
             <TileLayer
               attribution="&copy; OpenStreetMap"
@@ -695,6 +696,22 @@ function FitBounds({ points }) {
     }
     map.fitBounds(clean, { padding: [34, 34], maxZoom: 11 });
   }, [map, points]);
+
+  return null;
+}
+
+function ResizeMap() {
+  const map = useMap();
+
+  useEffect(() => {
+    const resize = () => map.invalidateSize();
+    const timer = window.setTimeout(resize, 120);
+    window.addEventListener('resize', resize);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('resize', resize);
+    };
+  }, [map]);
 
   return null;
 }
@@ -1173,6 +1190,7 @@ function RoutePointPicker({ points, setPoints }) {
         <span>Haz clic en el mapa para agregar puntos. El primer punto es el inicio; el ultimo es el destino.</span>
       </div>
       <MapContainer center={center} zoom={9} scrollWheelZoom className="route-picker-map">
+        <ResizeMap />
         <FitBounds points={clean} />
         <RouteMapClick onAdd={(point) => setPoints([...clean, point])} />
         <TileLayer
