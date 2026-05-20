@@ -101,6 +101,28 @@ function cleanPoints(points) {
   return (Array.isArray(points) ? points : []).filter(validPoint).map((point) => [Number(point[0]), Number(point[1])]);
 }
 
+async function calculateRoadRoute(points) {
+  const waypoints = cleanPoints(points);
+  if (waypoints.length < 2) {
+    throw new Error('Marca al menos inicio y destino.');
+  }
+
+  const coordinates = waypoints.map(([lat, lng]) => `${lng},${lat}`).join(';');
+  const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson`);
+  const payload = await response.json();
+  const route = payload.routes?.[0];
+
+  if (!response.ok || !route) {
+    throw new Error('No se pudo calcular la ruta por carretera.');
+  }
+
+  return {
+    points: route.geometry.coordinates.map(([lng, lat]) => [Number(lat.toFixed(6)), Number(lng.toFixed(6))]),
+    distance: Math.max(1, Math.round(route.distance / 1000)),
+    duration: `${Math.max(1, Math.round(route.duration / 60))} min`
+  };
+}
+
 function useClubData() {
   const [data, setData] = useState({
     stats: null,
@@ -680,16 +702,17 @@ function FitBounds({ points }) {
 function RouteOverlay({ route }) {
   const points = cleanPoints(route.points);
   const start = cleanPoints([route.start])[0] || points[0];
+  const markerPoints = points.length > 24 ? [points[0], points[points.length - 1]].filter(Boolean) : points;
   if (points.length === 0 && !start) return null;
 
   return (
     <React.Fragment>
       {points.length > 1 && <Polyline positions={points} pathOptions={{ color: '#ff243d', weight: 5, opacity: 0.85 }} />}
-      {points.map((point, index) => (
+      {markerPoints.map((point, index) => (
         <Marker position={point} key={`${route.id}-${index}`}>
           <Popup>
             <strong>{route.name}</strong><br />
-            Punto {index + 1} | {route.difficulty}<br />
+            {points.length > 24 ? (index === 0 ? 'Inicio' : 'Destino') : `Punto ${index + 1}`} | {route.difficulty}<br />
             {route.weather}
           </Popup>
         </Marker>
@@ -1038,9 +1061,12 @@ function EditRouteModal({ route, onClose, onSave }) {
     comments: route.comments || []
   });
   const [manualPoint, setManualPoint] = useState({ lat: '', lng: '' });
+  const [routeStatus, setRouteStatus] = useState('');
+  const hasCalculatedPath = form.points.length > 24;
 
   function setPoints(points) {
     const nextPoints = cleanPoints(points);
+    setRouteStatus('');
     setForm((current) => ({
       ...current,
       points: nextPoints,
@@ -1054,6 +1080,27 @@ function EditRouteModal({ route, onClose, onSave }) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
     setPoints([...form.points, [lat, lng]]);
     setManualPoint({ lat: '', lng: '' });
+  }
+
+  async function calculatePath() {
+    if (hasCalculatedPath) {
+      setRouteStatus('Esta ruta ya tiene un trazado calculado. Para cambiarla, limpia los puntos y marca inicio, paradas y destino otra vez.');
+      return;
+    }
+    setRouteStatus('Calculando ruta por carretera...');
+    try {
+      const roadRoute = await calculateRoadRoute(form.points);
+      setForm((current) => ({
+        ...current,
+        points: roadRoute.points,
+        start: roadRoute.points[0] || [],
+        distance: roadRoute.distance,
+        duration: roadRoute.duration
+      }));
+      setRouteStatus(`Ruta calculada: ${roadRoute.distance} km aprox. por carretera.`);
+    } catch (error) {
+      setRouteStatus(error.message || 'No se pudo calcular la ruta.');
+    }
   }
 
   function submit(event) {
@@ -1088,11 +1135,19 @@ function EditRouteModal({ route, onClose, onSave }) {
           <label>Latitud<input value={manualPoint.lat} onChange={(event) => setManualPoint({ ...manualPoint, lat: event.target.value })} placeholder="-12.0464" /></label>
           <label>Longitud<input value={manualPoint.lng} onChange={(event) => setManualPoint({ ...manualPoint, lng: event.target.value })} placeholder="-77.0428" /></label>
           <button className="ghost-button small" type="button" onClick={addManualPoint}><MapPin size={16} /> Agregar punto</button>
+          <button className="primary-button small" type="button" onClick={calculatePath}><Route size={16} /> Calcular por carretera</button>
           <button className="danger-button small" type="button" onClick={() => setPoints([])}><Trash2 size={16} /> Limpiar puntos</button>
         </div>
+        {routeStatus && <p className="wide-field route-status">{routeStatus}</p>}
         <div className="wide-field point-list">
           {form.points.length === 0 ? (
-            <p>Haz clic en el mapa para marcar inicio, paradas y destino. La ruta se dibuja en el orden de los clics.</p>
+            <p>Haz clic en el mapa para marcar inicio, paradas y destino. Luego usa "Calcular por carretera" para seguir la pista real.</p>
+          ) : hasCalculatedPath ? (
+            <span>
+              Ruta por carretera guardada con {form.points.length} puntos. Inicio {form.points[0]?.[0]?.toFixed(5)}, {form.points[0]?.[1]?.toFixed(5)}
+              {' '}| destino {form.points[form.points.length - 1]?.[0]?.toFixed(5)}, {form.points[form.points.length - 1]?.[1]?.toFixed(5)}
+              <button type="button" onClick={() => setPoints([])}>Limpiar</button>
+            </span>
           ) : form.points.map((point, index) => (
             <span key={`${point[0]}-${point[1]}-${index}`}>
               {index + 1}. {point[0].toFixed(5)}, {point[1].toFixed(5)}
@@ -1109,6 +1164,7 @@ function EditRouteModal({ route, onClose, onSave }) {
 function RoutePointPicker({ points, setPoints }) {
   const clean = cleanPoints(points);
   const center = clean[0] || [-12.0464, -77.0428];
+  const markerPoints = clean.length > 24 ? [clean[0], clean[clean.length - 1]].filter(Boolean) : clean;
 
   return (
     <div>
@@ -1124,9 +1180,9 @@ function RoutePointPicker({ points, setPoints }) {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         {clean.length > 1 && <Polyline positions={clean} pathOptions={{ color: '#ff243d', weight: 5, opacity: 0.9 }} />}
-        {clean.map((point, index) => (
+        {markerPoints.map((point, index) => (
           <Marker position={point} key={`${point[0]}-${point[1]}-${index}`}>
-            <Popup>{index === 0 ? 'Inicio' : index === clean.length - 1 ? 'Destino' : `Parada ${index}`}</Popup>
+            <Popup>{clean.length > 24 ? (index === 0 ? 'Inicio' : 'Destino') : index === 0 ? 'Inicio' : index === clean.length - 1 ? 'Destino' : `Parada ${index}`}</Popup>
           </Marker>
         ))}
       </MapContainer>
