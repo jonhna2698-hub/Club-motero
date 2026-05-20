@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CloudSun,
+  Edit3,
   Gauge,
   Heart,
   Lock,
@@ -97,6 +98,9 @@ function App() {
   });
   const [authOpen, setAuthOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [editingPhoto, setEditingPhoto] = useState(null);
+  const [viewingPhoto, setViewingPhoto] = useState(null);
+  const [editingRoute, setEditingRoute] = useState(null);
   const [notice, setNotice] = useState('');
 
   const filteredRoutes = useMemo(() => {
@@ -125,6 +129,7 @@ function App() {
           setActiveRoute={setActiveRoute}
           activeDifficulty={activeDifficulty}
           setActiveDifficulty={setActiveDifficulty}
+          onEditRoute={setEditingRoute}
         />
         <Gallery
           gallery={data.gallery}
@@ -138,6 +143,8 @@ function App() {
               gallery: current.gallery.map((photo) => photo.id === id ? { ...photo, reactions: photo.reactions + 1 } : photo)
             }));
           }}
+          onEdit={setEditingPhoto}
+          onOpen={setViewingPhoto}
         />
         <Bikes
           bikes={data.bikes}
@@ -188,6 +195,38 @@ function App() {
             setData((current) => ({ ...current, gallery: [photo, ...current.gallery] }));
             setUploadOpen(false);
             setNotice('Foto subida a la galeria');
+            setTimeout(() => setNotice(''), 2600);
+          }}
+        />
+      )}
+      {editingPhoto && (
+        <EditPhotoModal
+          photo={editingPhoto}
+          onClose={() => setEditingPhoto(null)}
+          onSave={(updatedPhoto) => {
+            setData((current) => ({
+              ...current,
+              gallery: current.gallery.map((photo) => photo.id === updatedPhoto.id ? updatedPhoto : photo)
+            }));
+            setViewingPhoto((current) => current?.id === updatedPhoto.id ? updatedPhoto : current);
+            setEditingPhoto(null);
+            setNotice('Foto actualizada');
+            setTimeout(() => setNotice(''), 2600);
+          }}
+        />
+      )}
+      {viewingPhoto && <PhotoLightbox photo={viewingPhoto} onClose={() => setViewingPhoto(null)} onEdit={() => setEditingPhoto(viewingPhoto)} />}
+      {editingRoute && (
+        <EditRouteModal
+          route={editingRoute}
+          onClose={() => setEditingRoute(null)}
+          onSave={(updatedRoute) => {
+            setData((current) => ({
+              ...current,
+              routes: current.routes.map((route) => route.id === updatedRoute.id ? updatedRoute : route)
+            }));
+            setEditingRoute(null);
+            setNotice('Ruta actualizada');
             setTimeout(() => setNotice(''), 2600);
           }}
         />
@@ -287,7 +326,7 @@ function MiniPanel({ title, text, icon }) {
   );
 }
 
-function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setActiveDifficulty }) {
+function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setActiveDifficulty, onEditRoute }) {
   const center = routes[0]?.start || [-12.0464, -77.0428];
 
   return (
@@ -334,6 +373,7 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
                 <h3>{route.name}</h3>
                 <p>{route.description}</p>
               </div>
+              <button className="edit-button" onClick={() => onEditRoute(route)}><Edit3 size={16} /> Editar ruta</button>
               <div className="route-meta">
                 <span><MapPin size={16} /> {route.distance} km</span>
                 <span><CalendarDays size={16} /> {route.date}</span>
@@ -352,7 +392,7 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
   );
 }
 
-function Gallery({ gallery, onUpload, onReact }) {
+function Gallery({ gallery, onUpload, onReact, onEdit, onOpen }) {
   const filters = ['integrante', 'moto', 'evento', 'ubicacion'];
   return (
     <section id="galeria" className="section">
@@ -368,7 +408,9 @@ function Gallery({ gallery, onUpload, onReact }) {
       <div className="gallery-grid">
         {gallery.map((photo, index) => (
           <motion.article className={`photo-card span-${index % 3}`} key={photo.id} whileHover={{ y: -8 }}>
-            <img src={photo.image} alt={photo.title} loading="lazy" />
+            <button className="photo-open" onClick={() => onOpen(photo)} aria-label={`Abrir ${photo.title}`}>
+              <img src={photo.image} alt={photo.title} loading="lazy" />
+            </button>
             <div className="photo-info">
               <span>{photo.event}</span>
               <h3>{photo.title}</h3>
@@ -376,6 +418,7 @@ function Gallery({ gallery, onUpload, onReact }) {
               <div>
                 <button className="inline-action" onClick={() => onReact(photo.id)}><Heart size={16} /> {photo.reactions}</button>
                 <span><MessageCircle size={16} /> {photo.comments.length}</span>
+                <button className="inline-action" onClick={() => onEdit(photo)}><Edit3 size={16} /> Editar</button>
               </div>
             </div>
           </motion.article>
@@ -595,6 +638,110 @@ function UploadPhotoModal({ token, onClose, onUploaded }) {
         <button className="primary-button" disabled={loading} type="submit"><Upload size={17} /> {loading ? 'Subiendo' : 'Publicar foto'}</button>
       </form>
     </Modal>
+  );
+}
+
+function EditPhotoModal({ photo, onClose, onSave }) {
+  const [form, setForm] = useState({
+    title: photo.title,
+    location: photo.location,
+    moto: photo.moto || '',
+    event: photo.event || '',
+    image: photo.image
+  });
+  const [preview, setPreview] = useState(photo.image);
+  const [error, setError] = useState('');
+
+  function pickFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return setError('Selecciona una imagen valida.');
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((current) => ({ ...current, image: reader.result }));
+      setPreview(reader.result);
+      setError('');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    onSave({ ...photo, ...form });
+  }
+
+  return (
+    <Modal title="Editar foto" onClose={onClose}>
+      <form className="modal-form" onSubmit={submit}>
+        <label>Nombre de la foto<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+        <label>Ubicacion<input required value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} /></label>
+        <label>Moto<input value={form.moto} onChange={(event) => setForm({ ...form, moto: event.target.value })} /></label>
+        <label>Evento<input value={form.event} onChange={(event) => setForm({ ...form, event: event.target.value })} /></label>
+        <label>Cambiar imagen<input type="file" accept="image/*" onChange={pickFile} /></label>
+        <img className="upload-preview" src={preview} alt={form.title} />
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" type="submit"><Edit3 size={17} /> Guardar cambios</button>
+      </form>
+    </Modal>
+  );
+}
+
+function EditRouteModal({ route, onClose, onSave }) {
+  const [form, setForm] = useState({
+    name: route.name,
+    type: route.type,
+    date: route.date,
+    distance: route.distance,
+    duration: route.duration,
+    participants: route.participants,
+    difficulty: route.difficulty,
+    weather: route.weather,
+    description: route.description
+  });
+
+  function submit(event) {
+    event.preventDefault();
+    onSave({
+      ...route,
+      ...form,
+      distance: Number(form.distance),
+      participants: Number(form.participants)
+    });
+  }
+
+  return (
+    <Modal title="Editar ruta y ubicacion" onClose={onClose}>
+      <form className="modal-form two-columns" onSubmit={submit}>
+        <label>Nombre de ruta<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+        <label>Tipo<input required value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })} /></label>
+        <label>Fecha<input required type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+        <label>Distancia km<input required type="number" value={form.distance} onChange={(event) => setForm({ ...form, distance: event.target.value })} /></label>
+        <label>Duracion<input required value={form.duration} onChange={(event) => setForm({ ...form, duration: event.target.value })} /></label>
+        <label>Participantes<input required type="number" value={form.participants} onChange={(event) => setForm({ ...form, participants: event.target.value })} /></label>
+        <label>Dificultad<input required value={form.difficulty} onChange={(event) => setForm({ ...form, difficulty: event.target.value })} /></label>
+        <label>Clima<input required value={form.weather} onChange={(event) => setForm({ ...form, weather: event.target.value })} /></label>
+        <label className="wide-field">Descripcion<input required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+        <button className="primary-button wide-field" type="submit"><Edit3 size={17} /> Guardar ruta</button>
+      </form>
+    </Modal>
+  );
+}
+
+function PhotoLightbox({ photo, onClose, onEdit }) {
+  return (
+    <div className="lightbox" role="dialog" aria-modal="true">
+      <div className="lightbox-toolbar">
+        <div>
+          <strong>{photo.title}</strong>
+          <span>{photo.location}</span>
+        </div>
+        <div className="lightbox-actions">
+          <button className="ghost-button small" onClick={onEdit}><Edit3 size={16} /> Editar</button>
+          <button className="icon-button" onClick={onClose} aria-label="Cerrar"><X /></button>
+        </div>
+      </div>
+      <img src={photo.image} alt={photo.title} />
+    </div>
   );
 }
 

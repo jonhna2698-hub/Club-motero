@@ -460,6 +460,17 @@ small {
   background: var(--panel-solid);
 }
 
+.photo-open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
 .photo-card.span-1 {
   min-height: 520px;
 }
@@ -503,7 +514,8 @@ small {
 
 .inline-action,
 .action-link,
-.text-button {
+.text-button,
+.edit-button {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -516,8 +528,16 @@ small {
 
 .inline-action:hover,
 .action-link:hover,
-.text-button:hover {
+.text-button:hover,
+.edit-button:hover {
   color: white;
+}
+
+.edit-button {
+  width: fit-content;
+  margin-top: 0.65rem;
+  color: #dfe4ed;
+  font-weight: 800;
 }
 
 .bike-grid {
@@ -763,6 +783,14 @@ small {
   padding: 1rem;
 }
 
+.modal-form.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.wide-field {
+  grid-column: 1 / -1;
+}
+
 .modal-form label {
   display: grid;
   gap: 0.35rem;
@@ -808,6 +836,49 @@ small {
   background: rgba(12, 15, 20, 0.95);
   color: white;
   box-shadow: 0 18px 55px rgba(0, 0, 0, 0.42);
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: rgba(0, 0, 0, 0.92);
+  padding: clamp(0.8rem, 2vw, 1.5rem);
+}
+
+.lightbox-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.lightbox-toolbar strong,
+.lightbox-toolbar span {
+  display: block;
+}
+
+.lightbox-toolbar span {
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+.lightbox-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.lightbox > img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  background: #050608;
 }
 
 @media (max-width: 1080px) {
@@ -891,6 +962,10 @@ small {
   }
 
   .checklist {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-form.two-columns {
     grid-template-columns: 1fr;
   }
 
