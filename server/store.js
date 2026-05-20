@@ -1,10 +1,30 @@
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { seed } from './seed.js';
 
-const db = structuredClone(seed);
+const localDbPath = path.join(process.cwd(), 'data', 'local-db.json');
+const db = loadLocalDb();
 const bucket = process.env.SUPABASE_PHOTOS_BUCKET || 'club-photos';
 const supabaseEnabled = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+function loadLocalDb() {
+  try {
+    if (fs.existsSync(localDbPath)) {
+      return JSON.parse(fs.readFileSync(localDbPath, 'utf8'));
+    }
+  } catch {
+    // If the local cache is damaged, fall back to the seed so the app can boot.
+  }
+  return structuredClone(seed);
+}
+
+async function persistLocalDb() {
+  if (supabaseEnabled) return;
+  await fs.promises.mkdir(path.dirname(localDbPath), { recursive: true });
+  await fs.promises.writeFile(localDbPath, JSON.stringify(db, null, 2));
+}
 
 async function supabaseRequest(table, { method = 'GET', query = '', body, prefer = 'return=representation' } = {}) {
   const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/${table}${query}`, {
@@ -121,7 +141,7 @@ export function isSupabaseConfigured() {
 }
 
 export async function getHealth() {
-  return { ok: true, club: 'Rapidos y Precoces', database: supabaseEnabled ? 'supabase' : 'memory' };
+  return { ok: true, club: 'Rapidos y Precoces', database: supabaseEnabled ? 'supabase' : 'local-file', localDbPath: supabaseEnabled ? null : localDbPath };
 }
 
 export async function getStats() {
@@ -202,6 +222,7 @@ export async function registerMember(body) {
       km: 0
     };
     db.users.push(user);
+    await persistLocalDb();
     return user;
   }
 
@@ -250,6 +271,7 @@ export async function createRoute(body, user) {
   const route = { ...safeBody, id: randomUUID(), createdBy: user.id };
   if (!supabaseEnabled) {
     db.routes.unshift(route);
+    await persistLocalDb();
     return route;
   }
   const { createdBy: _createdBy, ...payload } = route;
@@ -265,6 +287,7 @@ export async function updateRoute(id, body) {
     const index = db.routes.findIndex((route) => route.id === id);
     if (index < 0) return null;
     db.routes[index] = { ...db.routes[index], ...payload };
+    await persistLocalDb();
     return db.routes[index];
   }
   return normalizeRoute(first(await supabaseRequest('routes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
@@ -275,6 +298,7 @@ export async function deleteRoute(id) {
     const index = db.routes.findIndex((route) => route.id === id);
     if (index < 0) return false;
     db.routes.splice(index, 1);
+    await persistLocalDb();
     return true;
   }
   await supabaseRequest('routes', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
@@ -296,6 +320,7 @@ export async function createPhoto(body, user) {
   };
   if (!supabaseEnabled) {
     db.gallery.unshift(photo);
+    await persistLocalDb();
     return photo;
   }
   return first(await supabaseRequest('gallery_photos', { method: 'POST', body: photo }));
@@ -308,6 +333,7 @@ export async function updatePhoto(id, body) {
     const index = db.gallery.findIndex((photo) => photo.id === id);
     if (index < 0) return null;
     db.gallery[index] = { ...db.gallery[index], ...next };
+    await persistLocalDb();
     return db.gallery[index];
   }
   return first(await supabaseRequest('gallery_photos', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: next }));
@@ -318,6 +344,7 @@ export async function deletePhoto(id) {
     const index = db.gallery.findIndex((photo) => photo.id === id);
     if (index < 0) return false;
     db.gallery.splice(index, 1);
+    await persistLocalDb();
     return true;
   }
   await supabaseRequest('gallery_photos', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
@@ -340,6 +367,7 @@ export async function commentPhoto(id, body, user) {
     const photo = db.gallery.find((item) => item.id === id);
     if (!photo) return null;
     photo.comments = [...(photo.comments || []), comment];
+    await persistLocalDb();
     return photo;
   }
   const photo = first(await supabaseRequest('gallery_photos', { query: `?select=*&id=eq.${encodeURIComponent(id)}&limit=1` }));
@@ -353,6 +381,7 @@ export async function reactPhoto(id) {
     const photo = db.gallery.find((item) => item.id === id);
     if (!photo) return null;
     photo.reactions += 1;
+    await persistLocalDb();
     return photo;
   }
   const photo = first(await supabaseRequest('gallery_photos', { query: `?select=*&id=eq.${encodeURIComponent(id)}&limit=1` }));
@@ -365,6 +394,7 @@ export async function createBike(body, user) {
   const bike = { ...safeBody, id: randomUUID(), ownerId: user.id, votes: 0 };
   if (!supabaseEnabled) {
     db.bikes.unshift(bike);
+    await persistLocalDb();
     return bike;
   }
   const { ownerId: _generatedOwnerId, ...payload } = bike;
@@ -377,6 +407,7 @@ export async function updateBike(id, body) {
     const index = db.bikes.findIndex((bike) => bike.id === id);
     if (index < 0) return null;
     db.bikes[index] = { ...db.bikes[index], ...payload };
+    await persistLocalDb();
     return db.bikes[index];
   }
   return normalizeBike(first(await supabaseRequest('bikes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
@@ -387,6 +418,7 @@ export async function deleteBike(id) {
     const index = db.bikes.findIndex((bike) => bike.id === id);
     if (index < 0) return false;
     db.bikes.splice(index, 1);
+    await persistLocalDb();
     return true;
   }
   await supabaseRequest('bikes', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
@@ -396,6 +428,7 @@ export async function deleteBike(id) {
 export async function setFeaturedBike(id) {
   if (!supabaseEnabled) {
     db.bikes.forEach((bike) => { bike.featured = bike.id === id; });
+    await persistLocalDb();
     return db.bikes.find((bike) => bike.id === id) || null;
   }
   await supabaseRequest('bikes', { method: 'PATCH', query: '?featured=eq.true', body: { featured: false }, prefer: 'return=minimal' });
@@ -407,6 +440,7 @@ export async function voteBike(id) {
     const bike = db.bikes.find((item) => item.id === id);
     if (!bike) return null;
     bike.votes += 1;
+    await persistLocalDb();
     return bike;
   }
   const bike = first(await supabaseRequest('bikes', { query: `?select=*&id=eq.${encodeURIComponent(id)}&limit=1` }));
@@ -419,6 +453,7 @@ export async function createEvent(body, user) {
   const event = { ...safeBody, id: randomUUID(), attendees: [user.nickname, ...(safeBody.attendees || [])].filter((item, index, arr) => item && arr.indexOf(item) === index) };
   if (!supabaseEnabled) {
     db.events.unshift(event);
+    await persistLocalDb();
     return event;
   }
   const { meetingPoint, ...payload } = event;
@@ -434,6 +469,7 @@ export async function updateEvent(id, body) {
     const index = db.events.findIndex((event) => event.id === id);
     if (index < 0) return null;
     db.events[index] = { ...db.events[index], ...basePayload };
+    await persistLocalDb();
     return db.events[index];
   }
   const payload = { ...basePayload };
@@ -449,6 +485,7 @@ export async function deleteEvent(id) {
     const index = db.events.findIndex((event) => event.id === id);
     if (index < 0) return false;
     db.events.splice(index, 1);
+    await persistLocalDb();
     return true;
   }
   await supabaseRequest('events', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
@@ -460,6 +497,7 @@ export async function attendEvent(id, user) {
     const event = db.events.find((item) => item.id === id);
     if (!event) return null;
     if (!event.attendees.includes(user.nickname)) event.attendees.push(user.nickname);
+    await persistLocalDb();
     return event;
   }
   const event = first(await supabaseRequest('events', { query: `?select=*&id=eq.${encodeURIComponent(id)}&limit=1` }));
@@ -481,6 +519,7 @@ export async function createPost(body, user) {
   };
   if (!supabaseEnabled) {
     db.posts.unshift(post);
+    await persistLocalDb();
     return post;
   }
   const { readTime, ...payload } = post;
@@ -498,6 +537,7 @@ export async function updatePost(id, body) {
     const index = db.posts.findIndex((post) => post.id === id);
     if (index < 0) return null;
     db.posts[index] = { ...db.posts[index], ...body };
+    await persistLocalDb();
     return db.posts[index];
   }
   return normalizePost(first(await supabaseRequest('posts', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
@@ -508,6 +548,7 @@ export async function deletePost(id) {
     const index = db.posts.findIndex((post) => post.id === id);
     if (index < 0) return false;
     db.posts.splice(index, 1);
+    await persistLocalDb();
     return true;
   }
   await supabaseRequest('posts', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
@@ -535,6 +576,7 @@ export async function updateMember(id, body, requester) {
     const index = db.users.findIndex((member) => member.id === id);
     if (index < 0) return null;
     db.users[index] = { ...db.users[index], ...payload };
+    await persistLocalDb();
     return publicUser(db.users[index]);
   }
   return publicUser(first(await supabaseRequest('members', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));

@@ -6,3 +6,5 @@ dist/
 npm-debug.log*
 uploads/*
 !uploads/.gitkeep
+data/*.json
+!data/.gitkeep
