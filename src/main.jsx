@@ -12,17 +12,21 @@ import {
   Heart,
   Lock,
   LogIn,
+  LogOut,
   MapPin,
   Medal,
   Menu,
   MessageCircle,
   Moon,
+  Plus,
   Route,
   Shield,
   Sparkles,
   Star,
+  Trash2,
   Trophy,
   Upload,
+  User,
   Users,
   X,
   Zap
@@ -74,6 +78,18 @@ async function sendJson(path, options = {}) {
   return payload;
 }
 
+function readImageFile(file, maxMb = 5) {
+  return new Promise((resolve, reject) => {
+    if (!file) return resolve('');
+    if (!file.type.startsWith('image/')) return reject(new Error('Selecciona una imagen valida.'));
+    if (file.size > maxMb * 1024 * 1024) return reject(new Error(`La imagen no debe superar ${maxMb} MB.`));
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function useClubData() {
   const [data, setData] = useState({
     stats: null,
@@ -116,7 +132,23 @@ function App() {
   const [editingPhoto, setEditingPhoto] = useState(null);
   const [viewingPhoto, setViewingPhoto] = useState(null);
   const [editingRoute, setEditingRoute] = useState(null);
+  const [editingBike, setEditingBike] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
+  const [editingPost, setEditingPost] = useState(null);
+  const [editingMember, setEditingMember] = useState(null);
   const [notice, setNotice] = useState('');
+  const isAdmin = ['fundador', 'administrador', 'moderador'].includes(auth?.user?.role);
+
+  function showNotice(message) {
+    setNotice(message);
+    setTimeout(() => setNotice(''), 2600);
+  }
+
+  function logout() {
+    localStorage.removeItem('ryp-auth');
+    setAuth(null);
+    showNotice('Sesion cerrada');
+  }
 
   const filteredRoutes = useMemo(() => {
     return data.routes.filter((route) => {
@@ -128,7 +160,14 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Header mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+      <Header
+        mobileOpen={mobileOpen}
+        setMobileOpen={setMobileOpen}
+        auth={auth}
+        onLogin={() => setAuthOpen(true)}
+        onLogout={logout}
+        onProfile={() => setEditingMember(auth?.user)}
+      />
       <main>
         <Hero
           stats={data.stats}
@@ -144,7 +183,12 @@ function App() {
           setActiveRoute={setActiveRoute}
           activeDifficulty={activeDifficulty}
           setActiveDifficulty={setActiveDifficulty}
-          onEditRoute={setEditingRoute}
+          onEditRoute={(route) => auth ? setEditingRoute(route) : setAuthOpen(true)}
+          onCreateRoute={() => {
+            if (!auth) return setAuthOpen(true);
+            setEditingRoute({ id: null, name: '', type: 'costera', date: new Date().toISOString().slice(0, 10), distance: 0, duration: '2h', participants: 1, difficulty: 'facil', weather: '', description: '', start: [-12.0464, -77.0428], points: [[-12.0464, -77.0428]], photos: [], comments: [] });
+          }}
+          isAdmin={isAdmin}
         />
         <Gallery
           gallery={data.gallery}
@@ -169,9 +213,31 @@ function App() {
           }}
           onEdit={setEditingPhoto}
           onOpen={setViewingPhoto}
+          activeAuth={auth}
         />
         <Bikes
           bikes={data.bikes}
+          auth={auth}
+          isAdmin={isAdmin}
+          onCreate={() => {
+            if (!auth) return setAuthOpen(true);
+            setEditingBike({ id: null, owner: auth.user.nickname, brand: '', model: '', year: new Date().getFullYear(), cc: 0, color: '', type: 'naked', speed: '', consumption: '', mods: '', description: '', image: '', votes: 0, featured: false });
+          }}
+          onEdit={setEditingBike}
+          onDelete={(bike) => {
+            if (!isAdmin) return showNotice('Solo admin puede eliminar motos');
+            sendJson(`/bikes/${bike.id}`, { method: 'DELETE', token: auth.token }).then(() => {
+              setData((current) => ({ ...current, bikes: current.bikes.filter((item) => item.id !== bike.id) }));
+              showNotice('Moto eliminada');
+            }).catch((error) => showNotice(error.message));
+          }}
+          onFeatured={(bike) => {
+            if (!isAdmin) return showNotice('Solo admin puede elegir moto del mes');
+            sendJson(`/bikes/${bike.id}/featured`, { method: 'POST', token: auth.token }).then((updatedBike) => {
+              setData((current) => ({ ...current, bikes: current.bikes.map((item) => ({ ...item, featured: item.id === updatedBike.id })) }));
+              showNotice('Moto del mes actualizada');
+            }).catch((error) => showNotice(error.message));
+          }}
           onVote={(id) => {
             sendJson(`/bikes/${id}/vote`, { method: 'POST' })
               .then((updatedBike) => {
@@ -188,10 +254,32 @@ function App() {
               });
           }}
         />
-        <Members members={data.members} />
+        <Members
+          members={data.members}
+          auth={auth}
+          isAdmin={isAdmin}
+          onEdit={(member) => {
+            if (!auth) return setAuthOpen(true);
+            if (auth.user.id !== member.id && !isAdmin) return showNotice('Solo puedes editar tu perfil');
+            setEditingMember(member);
+          }}
+        />
         <Events
           events={data.events}
           auth={auth}
+          isAdmin={isAdmin}
+          onCreate={() => {
+            if (!isAdmin) return showNotice('Solo admin puede crear eventos');
+            setEditingEvent({ id: null, title: '', date: new Date().toISOString().slice(0, 16), meetingPoint: '', weather: '', recommendations: [], attendees: [], map: [-12.0464, -77.0428] });
+          }}
+          onEdit={setEditingEvent}
+          onDelete={(event) => {
+            if (!isAdmin) return showNotice('Solo admin puede eliminar eventos');
+            sendJson(`/events/${event.id}`, { method: 'DELETE', token: auth.token }).then(() => {
+              setData((current) => ({ ...current, events: current.events.filter((item) => item.id !== event.id) }));
+              showNotice('Evento eliminado');
+            }).catch((error) => showNotice(error.message));
+          }}
           onAttend={(id) => {
             if (!auth) return setAuthOpen(true);
             sendJson(`/events/${id}/attend`, { method: 'POST', token: auth.token })
@@ -212,9 +300,25 @@ function App() {
               });
           }}
         />
-        <Blog posts={data.posts} />
+        <Blog
+          posts={data.posts}
+          auth={auth}
+          isAdmin={isAdmin}
+          onCreate={() => {
+            if (!auth) return setAuthOpen(true);
+            setEditingPost({ id: null, title: '', category: 'Experiencias', excerpt: '', image: '', readTime: '4 min' });
+          }}
+          onEdit={setEditingPost}
+          onDelete={(post) => {
+            if (!isAdmin) return showNotice('Solo admin puede eliminar posts');
+            sendJson(`/posts/${post.id}`, { method: 'DELETE', token: auth.token }).then(() => {
+              setData((current) => ({ ...current, posts: current.posts.filter((item) => item.id !== post.id) }));
+              showNotice('Publicacion eliminada');
+            }).catch((error) => showNotice(error.message));
+          }}
+        />
         <Achievements members={data.members} stats={data.stats} bikes={data.bikes} />
-        <AdminPanel />
+        <AdminPanel stats={data.stats} members={data.members} gallery={data.gallery} routes={data.routes} events={data.events} isAdmin={isAdmin} />
       </main>
       {notice && <div className="toast">{notice}</div>}
       {authOpen && (
@@ -224,8 +328,7 @@ function App() {
             localStorage.setItem('ryp-auth', JSON.stringify(session));
             setAuth(session);
             setAuthOpen(false);
-            setNotice(`Sesion iniciada como ${session.user.nickname}`);
-            setTimeout(() => setNotice(''), 2600);
+            showNotice(`Sesion iniciada como ${session.user.nickname}`);
           }}
         />
       )}
@@ -236,8 +339,7 @@ function App() {
           onUploaded={(photo) => {
             setData((current) => ({ ...current, gallery: [photo, ...current.gallery] }));
             setUploadOpen(false);
-            setNotice('Foto subida a la galeria');
-            setTimeout(() => setNotice(''), 2600);
+            showNotice('Foto subida a la galeria');
           }}
         />
       )}
@@ -257,31 +359,121 @@ function App() {
               }));
               setViewingPhoto((current) => current?.id === savedPhoto.id ? savedPhoto : current);
               setEditingPhoto(null);
-              setNotice('Foto actualizada');
-              setTimeout(() => setNotice(''), 2600);
-            }).catch((error) => setNotice(error.message));
+              showNotice('Foto actualizada');
+            }).catch((error) => showNotice(error.message));
           }}
         />
       )}
-      {viewingPhoto && <PhotoLightbox photo={viewingPhoto} onClose={() => setViewingPhoto(null)} onEdit={() => setEditingPhoto(viewingPhoto)} />}
+      {viewingPhoto && (
+        <PhotoLightbox
+          photo={viewingPhoto}
+          auth={auth}
+          onClose={() => setViewingPhoto(null)}
+          onEdit={() => setEditingPhoto(viewingPhoto)}
+          onDelete={() => {
+            if (!auth) return setAuthOpen(true);
+            sendJson(`/gallery/${viewingPhoto.id}`, { method: 'DELETE', token: auth.token }).then(() => {
+              setData((current) => ({ ...current, gallery: current.gallery.filter((photo) => photo.id !== viewingPhoto.id) }));
+              setViewingPhoto(null);
+              showNotice('Foto eliminada');
+            }).catch((error) => showNotice(error.message));
+          }}
+          onComment={(text) => {
+            if (!auth) return setAuthOpen(true);
+            sendJson(`/gallery/${viewingPhoto.id}/comments`, { method: 'POST', token: auth.token, body: JSON.stringify({ text }) }).then((savedPhoto) => {
+              setData((current) => ({ ...current, gallery: current.gallery.map((photo) => photo.id === savedPhoto.id ? savedPhoto : photo) }));
+              setViewingPhoto(savedPhoto);
+            }).catch((error) => showNotice(error.message));
+          }}
+        />
+      )}
       {editingRoute && (
         <EditRouteModal
           route={editingRoute}
           onClose={() => setEditingRoute(null)}
           onSave={(updatedRoute) => {
-            sendJson(`/routes/${updatedRoute.id}`, {
-              method: 'PATCH',
+            const creating = !updatedRoute.id;
+            sendJson(creating ? '/routes' : `/routes/${updatedRoute.id}`, {
+              method: creating ? 'POST' : 'PATCH',
               token: auth?.token,
               body: JSON.stringify(updatedRoute)
             }).then((savedRoute) => {
               setData((current) => ({
                 ...current,
-                routes: current.routes.map((route) => route.id === savedRoute.id ? savedRoute : route)
+                routes: creating ? [savedRoute, ...current.routes] : current.routes.map((route) => route.id === savedRoute.id ? savedRoute : route)
               }));
               setEditingRoute(null);
-              setNotice('Ruta actualizada');
-              setTimeout(() => setNotice(''), 2600);
-            }).catch((error) => setNotice(error.message));
+              showNotice(creating ? 'Ruta creada' : 'Ruta actualizada');
+            }).catch((error) => showNotice(error.message));
+          }}
+          onDelete={(route) => {
+            if (!isAdmin || !route.id) return showNotice('Solo admin puede eliminar rutas');
+            sendJson(`/routes/${route.id}`, { method: 'DELETE', token: auth.token }).then(() => {
+              setData((current) => ({ ...current, routes: current.routes.filter((item) => item.id !== route.id) }));
+              setEditingRoute(null);
+              showNotice('Ruta eliminada');
+            }).catch((error) => showNotice(error.message));
+          }}
+        />
+      )}
+      {editingBike && (
+        <BikeModal
+          bike={editingBike}
+          onClose={() => setEditingBike(null)}
+          onSave={(bike) => {
+            const creating = !bike.id;
+            sendJson(creating ? '/bikes' : `/bikes/${bike.id}`, { method: creating ? 'POST' : 'PATCH', token: auth?.token, body: JSON.stringify(bike) }).then((savedBike) => {
+              setData((current) => ({ ...current, bikes: creating ? [savedBike, ...current.bikes] : current.bikes.map((item) => item.id === savedBike.id ? savedBike : item) }));
+              setEditingBike(null);
+              showNotice(creating ? 'Moto creada' : 'Moto actualizada');
+            }).catch((error) => showNotice(error.message));
+          }}
+        />
+      )}
+      {editingEvent && (
+        <EventModal
+          event={editingEvent}
+          onClose={() => setEditingEvent(null)}
+          onSave={(event) => {
+            const creating = !event.id;
+            sendJson(creating ? '/events' : `/events/${event.id}`, { method: creating ? 'POST' : 'PATCH', token: auth?.token, body: JSON.stringify(event) }).then((savedEvent) => {
+              setData((current) => ({ ...current, events: creating ? [savedEvent, ...current.events] : current.events.map((item) => item.id === savedEvent.id ? savedEvent : item) }));
+              setEditingEvent(null);
+              showNotice(creating ? 'Evento creado' : 'Evento actualizado');
+            }).catch((error) => showNotice(error.message));
+          }}
+        />
+      )}
+      {editingPost && (
+        <PostModal
+          post={editingPost}
+          onClose={() => setEditingPost(null)}
+          onSave={(post) => {
+            const creating = !post.id;
+            sendJson(creating ? '/posts' : `/posts/${post.id}`, { method: creating ? 'POST' : 'PATCH', token: auth?.token, body: JSON.stringify(post) }).then((savedPost) => {
+              setData((current) => ({ ...current, posts: creating ? [savedPost, ...current.posts] : current.posts.map((item) => item.id === savedPost.id ? savedPost : item) }));
+              setEditingPost(null);
+              showNotice(creating ? 'Publicacion creada' : 'Publicacion actualizada');
+            }).catch((error) => showNotice(error.message));
+          }}
+        />
+      )}
+      {editingMember && (
+        <ProfileModal
+          member={editingMember}
+          isAdmin={isAdmin}
+          onClose={() => setEditingMember(null)}
+          onSave={(member) => {
+            sendJson(`/members/${member.id}`, { method: 'PATCH', token: auth?.token, body: JSON.stringify(member) }).then((savedMember) => {
+              setData((current) => ({ ...current, members: current.members.map((item) => item.id === savedMember.id ? savedMember : item) }));
+              if (auth?.user?.id === savedMember.id) {
+                const session = { ...auth, user: savedMember };
+                localStorage.setItem('ryp-auth', JSON.stringify(session));
+                setAuth(session);
+              }
+              setEditingMember(null);
+              showNotice('Perfil actualizado');
+            }).catch((error) => showNotice(error.message));
           }}
         />
       )}
@@ -290,7 +482,7 @@ function App() {
   );
 }
 
-function Header({ mobileOpen, setMobileOpen }) {
+function Header({ mobileOpen, setMobileOpen, auth, onLogin, onLogout, onProfile }) {
   return (
     <header className="topbar">
       <a className="brand" href="#inicio" aria-label="Rapidos y Precoces">
@@ -305,6 +497,16 @@ function Header({ mobileOpen, setMobileOpen }) {
           <a key={id} href={`#${id}`}>{label}</a>
         ))}
       </nav>
+      <div className="session-actions">
+        {auth ? (
+          <>
+            <button className="ghost-button small" onClick={onProfile}><User size={16} /> {auth.user.nickname}</button>
+            <button className="icon-button" onClick={onLogout} aria-label="Cerrar sesion"><LogOut size={18} /></button>
+          </>
+        ) : (
+          <button className="ghost-button small" onClick={onLogin}><LogIn size={16} /> Entrar</button>
+        )}
+      </div>
       <button className="icon-button menu-button" onClick={() => setMobileOpen((value) => !value)} aria-label="Abrir menu">
         {mobileOpen ? <X /> : <Menu />}
       </button>
@@ -313,6 +515,14 @@ function Header({ mobileOpen, setMobileOpen }) {
           {nav.map(([id, label]) => (
             <a key={id} href={`#${id}`} onClick={() => setMobileOpen(false)}>{label}</a>
           ))}
+          {auth ? (
+            <>
+              <button className="ghost-button small" onClick={onProfile}><User size={16} /> Perfil</button>
+              <button className="ghost-button small" onClick={onLogout}><LogOut size={16} /> Salir</button>
+            </>
+          ) : (
+            <button className="ghost-button small" onClick={onLogin}><LogIn size={16} /> Entrar</button>
+          )}
         </nav>
       )}
     </header>
@@ -380,7 +590,7 @@ function MiniPanel({ title, text, icon }) {
   );
 }
 
-function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setActiveDifficulty, onEditRoute }) {
+function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setActiveDifficulty, onEditRoute, onCreateRoute, isAdmin }) {
   const center = routes[0]?.start || [-12.0464, -77.0428];
 
   return (
@@ -397,6 +607,7 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
         {['todas', 'facil', 'intermedia', 'alta'].map((item) => (
           <button className={activeDifficulty === item ? 'chip active danger' : 'chip'} key={item} onClick={() => setActiveDifficulty(item)}>{item}</button>
         ))}
+        <button className="primary-button small" onClick={onCreateRoute}><Plus size={16} /> Nueva ruta</button>
       </div>
       <div className="map-layout">
         <div className="map-frame">
@@ -427,7 +638,7 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
                 <h3>{route.name}</h3>
                 <p>{route.description}</p>
               </div>
-              <button className="edit-button" onClick={() => onEditRoute(route)}><Edit3 size={16} /> Editar ruta</button>
+              <button className="edit-button" onClick={() => onEditRoute(route)}><Edit3 size={16} /> {isAdmin ? 'Editar ruta' : 'Ver detalle'}</button>
               <div className="route-meta">
                 <span><MapPin size={16} /> {route.distance} km</span>
                 <span><CalendarDays size={16} /> {route.date}</span>
@@ -446,8 +657,14 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
   );
 }
 
-function Gallery({ gallery, onUpload, onReact, onEdit, onOpen }) {
-  const filters = ['integrante', 'moto', 'evento', 'ubicacion'];
+function Gallery({ gallery, onUpload, onReact, onEdit, onOpen, activeAuth }) {
+  const filters = ['todas', 'integrante', 'moto', 'evento', 'ubicacion', 'mis fotos'];
+  const [filter, setFilter] = useState('todas');
+  const filteredGallery = gallery.filter((photo) => {
+    if (filter === 'todas') return true;
+    if (filter === 'mis fotos') return activeAuth && photo.author === activeAuth.user.nickname;
+    return Boolean(photo[filter === 'integrante' ? 'author' : filter === 'ubicacion' ? 'location' : filter]);
+  });
   return (
     <section id="galeria" className="section">
       <SectionTitle
@@ -456,11 +673,12 @@ function Gallery({ gallery, onUpload, onReact, onEdit, onOpen }) {
         text="Un grid visual para subir fotos, reaccionar, comentar y filtrar recuerdos por integrante, moto, evento o ubicacion."
       />
       <div className="filter-row compact">
-        {filters.map((filter) => <button className="chip" key={filter}>{filter}</button>)}
+        {filters.map((item) => <button className={filter === item ? 'chip active' : 'chip'} key={item} onClick={() => setFilter(item)}>{item}</button>)}
         <button className="primary-button small" onClick={onUpload}><Upload size={16} /> Subir foto</button>
       </div>
       <div className="gallery-grid">
-        {gallery.map((photo, index) => (
+        {filteredGallery.length === 0 && <EmptyState title="Sin fotos para este filtro" text="Sube una nueva foto o cambia el filtro activo." />}
+        {filteredGallery.map((photo, index) => (
           <motion.article className={`photo-card span-${index % 3}`} key={photo.id} whileHover={{ y: -8 }}>
             <button className="photo-open" onClick={() => onOpen(photo)} aria-label={`Abrir ${photo.title}`}>
               <img src={photo.image} alt={photo.title} loading="lazy" />
@@ -472,7 +690,7 @@ function Gallery({ gallery, onUpload, onReact, onEdit, onOpen }) {
               <div>
                 <button className="inline-action" onClick={() => onReact(photo.id)}><Heart size={16} /> {photo.reactions}</button>
                 <span><MessageCircle size={16} /> {photo.comments.length}</span>
-                <button className="inline-action" onClick={() => onEdit(photo)}><Edit3 size={16} /> Editar</button>
+                {activeAuth && <button className="inline-action" onClick={() => onEdit(photo)}><Edit3 size={16} /> Editar</button>}
               </div>
             </div>
           </motion.article>
@@ -482,7 +700,7 @@ function Gallery({ gallery, onUpload, onReact, onEdit, onOpen }) {
   );
 }
 
-function Bikes({ bikes, onVote }) {
+function Bikes({ bikes, auth, isAdmin, onCreate, onEdit, onDelete, onFeatured, onVote }) {
   return (
     <section id="motos" className="section">
       <SectionTitle
@@ -490,7 +708,11 @@ function Bikes({ bikes, onVote }) {
         title="Maquinas registradas por la comunidad"
         text="Tarjetas de alto impacto con ficha tecnica, modificaciones, consumo, votos y motos destacadas."
       />
+      <div className="filter-row compact">
+        <button className="primary-button small" onClick={onCreate}><Plus size={16} /> Registrar moto</button>
+      </div>
       <div className="bike-grid">
+        {bikes.length === 0 && <EmptyState title="Sin motos registradas" text="Registra la primera maquina del club." />}
         {bikes.map((bike) => (
           <article className={bike.featured ? 'bike-card featured' : 'bike-card'} key={bike.id}>
             <img src={bike.image} alt={`${bike.brand} ${bike.model}`} loading="lazy" />
@@ -508,34 +730,10 @@ function Bikes({ bikes, onVote }) {
                 <span>{bike.consumption}<small>Consumo</small></span>
               </div>
               <p className="mods">{bike.mods}</p>
-            </div>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function Members({ members }) {
-  return (
-    <section id="miembros" className="section">
-      <SectionTitle
-        eyebrow="Perfiles biker"
-        title="Integrantes, roles, kilometros y reputacion"
-        text="Cada perfil muestra nickname, moto actual, kilometraje, fecha de ingreso, rol y redes sociales."
-      />
-      <div className="member-grid">
-        {members.map((member) => (
-          <article className="member-card" key={member.id}>
-            <img src={member.avatar} alt={member.nickname} loading="lazy" />
-            <div>
-              <span className="tag">{member.role}</span>
-              <h3>{member.nickname}</h3>
-              <p>{member.name} | {member.bike}</p>
-              <div className="member-stats">
-                <span>{member.routes}<small>rutas</small></span>
-                <span>{member.km?.toLocaleString('es-PE')}<small>km</small></span>
-                <span>{member.joinedAt}<small>ingreso</small></span>
+              <div className="card-actions">
+                {(auth?.user?.nickname === bike.owner || isAdmin) && <button className="ghost-button small" onClick={() => onEdit(bike)}><Edit3 size={16} /> Editar</button>}
+                {isAdmin && <button className="ghost-button small" onClick={() => onFeatured(bike)}><Trophy size={16} /> Moto del mes</button>}
+                {isAdmin && <button className="danger-button small" onClick={() => onDelete(bike)}><Trash2 size={16} /> Eliminar</button>}
               </div>
             </div>
           </article>
@@ -545,7 +743,39 @@ function Members({ members }) {
   );
 }
 
-function Events({ events, auth, onAttend }) {
+function Members({ members, auth, isAdmin, onEdit }) {
+  return (
+    <section id="miembros" className="section">
+      <SectionTitle
+        eyebrow="Perfiles biker"
+        title="Integrantes, roles, kilometros y reputacion"
+        text="Cada perfil muestra nickname, moto actual, kilometraje, fecha de ingreso, rol y redes sociales."
+      />
+      <div className="member-grid">
+        {members.length === 0 && <EmptyState title="Sin miembros" text="Los perfiles apareceran aqui cuando se registren." />}
+        {members.map((member) => (
+          <article className="member-card" key={member.id}>
+            <img src={member.avatar} alt={member.nickname} loading="lazy" />
+            <div>
+              <span className="tag">{member.role}</span>
+              <h3>{member.nickname}</h3>
+              <p>{member.name} | {member.bike}</p>
+              {member.description && <p>{member.description}</p>}
+              <div className="member-stats">
+                <span>{member.routes}<small>rutas</small></span>
+                <span>{member.km?.toLocaleString('es-PE')}<small>km</small></span>
+                <span>{member.joinedAt}<small>ingreso</small></span>
+              </div>
+              {(auth?.user?.id === member.id || isAdmin) && <button className="edit-button" onClick={() => onEdit(member)}><Edit3 size={16} /> Editar perfil</button>}
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function Events({ events, auth, isAdmin, onCreate, onEdit, onDelete, onAttend }) {
   return (
     <section id="eventos" className="section event-section">
       <SectionTitle
@@ -553,14 +783,18 @@ function Events({ events, auth, onAttend }) {
         title="Agenda con asistencia, clima y checklist"
         text="Organiza salidas con punto de encuentro, contador, participantes, recomendaciones y mapa del meetup."
       />
+      <div className="filter-row compact">
+        {isAdmin && <button className="primary-button small" onClick={onCreate}><Plus size={16} /> Crear evento</button>}
+      </div>
       <div className="event-grid">
-        {events.map((event) => <EventCard event={event} auth={auth} onAttend={onAttend} key={event.id} />)}
+        {events.length === 0 && <EmptyState title="Sin eventos" text="Crea la siguiente rodada del club." />}
+        {events.map((event) => <EventCard event={event} auth={auth} isAdmin={isAdmin} onEdit={onEdit} onDelete={onDelete} onAttend={onAttend} key={event.id} />)}
       </div>
     </section>
   );
 }
 
-function EventCard({ event, auth, onAttend }) {
+function EventCard({ event, auth, isAdmin, onEdit, onDelete, onAttend }) {
   const hours = Math.max(0, Math.ceil((new Date(event.date) - new Date()) / 36e5));
   const joined = Boolean(auth && event.attendees.includes(auth.user.nickname));
   return (
@@ -581,6 +815,12 @@ function EventCard({ event, auth, onAttend }) {
           {joined ? 'Confirmado' : 'Confirmar asistencia'}
         </button>
       </div>
+      {isAdmin && (
+        <div className="card-actions">
+          <button className="ghost-button small" onClick={() => onEdit(event)}><Edit3 size={16} /> Editar</button>
+          <button className="danger-button small" onClick={() => onDelete(event)}><Trash2 size={16} /> Eliminar</button>
+        </div>
+      )}
     </article>
   );
 }
@@ -642,17 +882,11 @@ function UploadPhotoModal({ token, onClose, onUploaded }) {
   function pickFile(event) {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('Selecciona una imagen valida.');
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImage(reader.result);
-      setPreview(reader.result);
+    readImageFile(file).then((result) => {
+      setImage(result);
+      setPreview(result);
       setError('');
-    };
-    reader.readAsDataURL(file);
+    }).catch((err) => setError(err.message));
   }
 
   async function submit(event) {
@@ -709,14 +943,11 @@ function EditPhotoModal({ photo, onClose, onSave }) {
   function pickFile(event) {
     const file = event.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) return setError('Selecciona una imagen valida.');
-    const reader = new FileReader();
-    reader.onload = () => {
-      setForm((current) => ({ ...current, image: reader.result }));
-      setPreview(reader.result);
+    readImageFile(file).then((result) => {
+      setForm((current) => ({ ...current, image: result }));
+      setPreview(result);
       setError('');
-    };
-    reader.readAsDataURL(file);
+    }).catch((err) => setError(err.message));
   }
 
   function submit(event) {
@@ -781,7 +1012,151 @@ function EditRouteModal({ route, onClose, onSave }) {
   );
 }
 
-function PhotoLightbox({ photo, onClose, onEdit }) {
+function BikeModal({ bike, onClose, onSave }) {
+  const [form, setForm] = useState(bike);
+  const [error, setError] = useState('');
+
+  async function pickFile(event) {
+    try {
+      const image = await readImageFile(event.target.files?.[0]);
+      if (image) setForm((current) => ({ ...current, image }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <Modal title={bike.id ? 'Editar moto' : 'Registrar moto'} onClose={onClose}>
+      <form className="modal-form two-columns" onSubmit={(event) => {
+        event.preventDefault();
+        onSave({ ...form, year: Number(form.year), cc: Number(form.cc) });
+      }}>
+        <label>Marca<input required value={form.brand} onChange={(event) => setForm({ ...form, brand: event.target.value })} /></label>
+        <label>Modelo<input required value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} /></label>
+        <label>Ano<input type="number" value={form.year} onChange={(event) => setForm({ ...form, year: event.target.value })} /></label>
+        <label>Cilindrada<input type="number" value={form.cc} onChange={(event) => setForm({ ...form, cc: event.target.value })} /></label>
+        <label>Color<input value={form.color || ''} onChange={(event) => setForm({ ...form, color: event.target.value })} /></label>
+        <label>Tipo<input value={form.type || ''} onChange={(event) => setForm({ ...form, type: event.target.value })} /></label>
+        <label>Velocidad<input value={form.speed || ''} onChange={(event) => setForm({ ...form, speed: event.target.value })} /></label>
+        <label>Consumo<input value={form.consumption || ''} onChange={(event) => setForm({ ...form, consumption: event.target.value })} /></label>
+        <label className="wide-field">Modificaciones<input value={form.mods || ''} onChange={(event) => setForm({ ...form, mods: event.target.value })} /></label>
+        <label className="wide-field">Descripcion<textarea value={form.description || ''} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+        <label className="wide-field">Foto<input type="file" accept="image/*" onChange={pickFile} /></label>
+        {form.image && <img className="upload-preview wide-field" src={form.image} alt={form.model || 'Moto'} />}
+        {error && <p className="form-error wide-field">{error}</p>}
+        <button className="primary-button wide-field" type="submit"><Bike size={17} /> Guardar moto</button>
+      </form>
+    </Modal>
+  );
+}
+
+function EventModal({ event, onClose, onSave }) {
+  const [form, setForm] = useState({
+    ...event,
+    recommendationsText: (event.recommendations || []).join(', ')
+  });
+
+  return (
+    <Modal title={event.id ? 'Editar evento' : 'Crear evento'} onClose={onClose}>
+      <form className="modal-form two-columns" onSubmit={(submitEvent) => {
+        submitEvent.preventDefault();
+        onSave({
+          ...form,
+          recommendations: form.recommendationsText.split(',').map((item) => item.trim()).filter(Boolean),
+          attendees: form.attendees || []
+        });
+      }}>
+        <label>Nombre<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+        <label>Fecha y hora<input required type="datetime-local" value={String(form.date).slice(0, 16)} onChange={(event) => setForm({ ...form, date: event.target.value })} /></label>
+        <label className="wide-field">Punto de encuentro<input required value={form.meetingPoint || ''} onChange={(event) => setForm({ ...form, meetingPoint: event.target.value })} /></label>
+        <label>Clima<input value={form.weather || ''} onChange={(event) => setForm({ ...form, weather: event.target.value })} /></label>
+        <label>Checklist<input value={form.recommendationsText} onChange={(event) => setForm({ ...form, recommendationsText: event.target.value })} /></label>
+        <button className="primary-button wide-field" type="submit"><CalendarDays size={17} /> Guardar evento</button>
+      </form>
+    </Modal>
+  );
+}
+
+function PostModal({ post, onClose, onSave }) {
+  const [form, setForm] = useState(post);
+  const [error, setError] = useState('');
+
+  async function pickFile(event) {
+    try {
+      const image = await readImageFile(event.target.files?.[0]);
+      if (image) setForm((current) => ({ ...current, image }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <Modal title={post.id ? 'Editar experiencia' : 'Nueva experiencia'} onClose={onClose}>
+      <form className="modal-form" onSubmit={(event) => {
+        event.preventDefault();
+        onSave(form);
+      }}>
+        <label>Titulo<input required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></label>
+        <label>Categoria<input value={form.category || ''} onChange={(event) => setForm({ ...form, category: event.target.value })} /></label>
+        <label>Historia<textarea required value={form.excerpt || ''} onChange={(event) => setForm({ ...form, excerpt: event.target.value })} /></label>
+        <label>Tiempo de lectura<input value={form.readTime || form.read_time || ''} onChange={(event) => setForm({ ...form, readTime: event.target.value })} /></label>
+        <label>Portada<input type="file" accept="image/*" onChange={pickFile} /></label>
+        {form.image && <img className="upload-preview" src={form.image} alt={form.title || 'Portada'} />}
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-button" type="submit"><Edit3 size={17} /> Guardar publicacion</button>
+      </form>
+    </Modal>
+  );
+}
+
+function ProfileModal({ member, isAdmin, onClose, onSave }) {
+  const [form, setForm] = useState(member);
+  const [error, setError] = useState('');
+
+  async function pickFile(event) {
+    try {
+      const avatar = await readImageFile(event.target.files?.[0]);
+      if (avatar) setForm((current) => ({ ...current, avatar }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <Modal title="Editar perfil biker" onClose={onClose}>
+      <form className="modal-form two-columns" onSubmit={(event) => {
+        event.preventDefault();
+        onSave({ ...form, routes: Number(form.routes || 0), km: Number(form.km || 0) });
+      }}>
+        <label>Nombre<input required value={form.name || ''} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
+        <label>Nickname<input required value={form.nickname || ''} onChange={(event) => setForm({ ...form, nickname: event.target.value })} /></label>
+        <label>Redes<input value={form.socials || ''} onChange={(event) => setForm({ ...form, socials: event.target.value })} /></label>
+        <label>Moto actual<input value={form.bike || ''} onChange={(event) => setForm({ ...form, bike: event.target.value })} /></label>
+        <label>Rutas<input type="number" value={form.routes || 0} onChange={(event) => setForm({ ...form, routes: event.target.value })} /></label>
+        <label>Kilometros<input type="number" value={form.km || 0} onChange={(event) => setForm({ ...form, km: event.target.value })} /></label>
+        {isAdmin && <label>Rol<input value={form.role || 'integrante'} onChange={(event) => setForm({ ...form, role: event.target.value })} /></label>}
+        <label className="wide-field">Descripcion<textarea value={form.description || ''} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+        <label className="wide-field">Foto de perfil<input type="file" accept="image/*" onChange={pickFile} /></label>
+        {form.avatar && <img className="upload-preview wide-field" src={form.avatar} alt={form.nickname || 'Perfil'} />}
+        {error && <p className="form-error wide-field">{error}</p>}
+        <button className="primary-button wide-field" type="submit"><User size={17} /> Guardar perfil</button>
+      </form>
+    </Modal>
+  );
+}
+
+function EmptyState({ title, text }) {
+  return (
+    <div className="empty-state">
+      <Sparkles size={18} />
+      <strong>{title}</strong>
+      <p>{text}</p>
+    </div>
+  );
+}
+
+function PhotoLightbox({ photo, auth, onClose, onEdit, onDelete, onComment }) {
+  const [comment, setComment] = useState('');
   return (
     <div className="lightbox" role="dialog" aria-modal="true">
       <div className="lightbox-toolbar">
@@ -790,11 +1165,30 @@ function PhotoLightbox({ photo, onClose, onEdit }) {
           <span>{photo.location}</span>
         </div>
         <div className="lightbox-actions">
-          <button className="ghost-button small" onClick={onEdit}><Edit3 size={16} /> Editar</button>
+          {auth && <button className="ghost-button small" onClick={onEdit}><Edit3 size={16} /> Editar</button>}
+          {auth && <button className="danger-button small" onClick={onDelete}><Trash2 size={16} /> Eliminar</button>}
           <button className="icon-button" onClick={onClose} aria-label="Cerrar"><X /></button>
         </div>
       </div>
-      <img src={photo.image} alt={photo.title} />
+      <div className="lightbox-body">
+        <img src={photo.image} alt={photo.title} />
+        <aside className="comments-panel">
+          <h3>Comentarios</h3>
+          {(photo.comments || []).map((item, index) => (
+            <p key={item.id || index}><strong>{item.author || 'Club'}:</strong> {item.text || item}</p>
+          ))}
+          {auth ? (
+            <form onSubmit={(event) => {
+              event.preventDefault();
+              onComment(comment);
+              setComment('');
+            }}>
+              <input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Escribe un comentario" />
+              <button className="primary-button small" type="submit">Comentar</button>
+            </form>
+          ) : <small>Inicia sesion para comentar.</small>}
+        </aside>
+      </div>
     </div>
   );
 }
@@ -813,7 +1207,7 @@ function Modal({ title, children, onClose }) {
   );
 }
 
-function Blog({ posts }) {
+function Blog({ posts, auth, isAdmin, onCreate, onEdit, onDelete }) {
   return (
     <section id="blog" className="section">
       <SectionTitle
@@ -821,7 +1215,11 @@ function Blog({ posts }) {
         title="Experiencias, consejos y cronicas de ruta"
         text="Publicaciones premium para historias de viaje, mantenimiento, modificaciones y cultura del club."
       />
+      <div className="filter-row compact">
+        {auth && <button className="primary-button small" onClick={onCreate}><Plus size={16} /> Nueva experiencia</button>}
+      </div>
       <div className="post-grid">
+        {posts.length === 0 && <EmptyState title="Sin publicaciones" text="Comparte la primera historia de ruta." />}
         {posts.map((post) => (
           <article className="post-card" key={post.id}>
             <img src={post.image} alt={post.title} loading="lazy" />
@@ -830,6 +1228,10 @@ function Blog({ posts }) {
               <h3>{post.title}</h3>
               <p>{post.excerpt}</p>
               <small>{post.author} | {post.readTime}</small>
+              <div className="card-actions">
+                {auth && <button className="ghost-button small" onClick={() => onEdit(post)}><Edit3 size={16} /> Editar</button>}
+                {isAdmin && <button className="danger-button small" onClick={() => onDelete(post)}><Trash2 size={16} /> Eliminar</button>}
+              </div>
             </div>
           </article>
         ))}
@@ -857,7 +1259,7 @@ function Achievements({ members, stats, bikes }) {
   );
 }
 
-function AdminPanel() {
+function AdminPanel({ stats, members, gallery, routes, events, isAdmin }) {
   const chartData = [
     { name: 'Ene', miembros: 38, rutas: 9 },
     { name: 'Feb', miembros: 42, rutas: 11 },
@@ -873,6 +1275,7 @@ function AdminPanel() {
         title="Moderacion, metricas y control operativo"
         text="Dashboard moderno para gestionar usuarios, aprobar contenido, moderar comentarios, revisar eventos y monitorear rutas."
       />
+      {!isAdmin && <EmptyState title="Panel protegido" text="Inicia sesion con rol fundador, administrador o moderador para gestionar la comunidad." />}
       <div className="admin-grid">
         <div className="admin-chart">
           <ResponsiveContainer width="100%" height={280}>
@@ -893,9 +1296,10 @@ function AdminPanel() {
           </ResponsiveContainer>
         </div>
         <div className="admin-widgets">
-          <FeatureCard icon={<Shield />} title="Aprobacion de contenido" text="7 publicaciones esperando revision." />
-          <FeatureCard icon={<MessageCircle />} title="Moderacion" text="2 comentarios reportados por la comunidad." />
-          <FeatureCard icon={<Lock />} title="Control de roles" text="Fundador, administrador, capitan, fotografo, moderador e integrante." />
+          <FeatureCard icon={<Shield />} title="Aprobacion de contenido" text={`${gallery.length} fotos visibles y listas para moderar.`} />
+          <FeatureCard icon={<Route />} title="Gestion de rutas" text={`${routes.length} rutas registradas en el mapa del club.`} />
+          <FeatureCard icon={<CalendarDays />} title="Eventos activos" text={`${events.length} rodadas y reuniones cargadas.`} />
+          <FeatureCard icon={<Users />} title="Usuarios" text={`${members.length || stats?.members || 0} perfiles en la comunidad.`} />
         </div>
       </div>
     </section>

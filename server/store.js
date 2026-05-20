@@ -49,7 +49,16 @@ function normalizeMember(member) {
     socials: member.socials,
     bike: member.bike,
     routes: member.routes,
-    km: member.km
+    km: member.km,
+    description: member.description || ''
+  };
+}
+
+function normalizeBike(bike) {
+  if (!bike) return bike;
+  return {
+    ...bike,
+    ownerId: bike.ownerId || bike.owner_id
   };
 }
 
@@ -58,6 +67,22 @@ function normalizeEvent(event) {
   return {
     ...event,
     meetingPoint: event.meetingPoint || event.meeting_point
+  };
+}
+
+function normalizePost(post) {
+  if (!post) return post;
+  return {
+    ...post,
+    readTime: post.readTime || post.read_time
+  };
+}
+
+function normalizeRoute(route) {
+  if (!route) return route;
+  return {
+    ...route,
+    createdBy: route.createdBy || route.created_by
   };
 }
 
@@ -116,7 +141,7 @@ export async function getStats() {
 
 export async function listRoutes() {
   if (!supabaseEnabled) return db.routes;
-  return supabaseRequest('routes', { query: '?select=*&order=date.desc' });
+  return (await supabaseRequest('routes', { query: '?select=*&order=date.desc' })).map(normalizeRoute);
 }
 
 export async function listGallery() {
@@ -126,7 +151,7 @@ export async function listGallery() {
 
 export async function listBikes() {
   if (!supabaseEnabled) return db.bikes;
-  return supabaseRequest('bikes', { query: '?select=*&order=votes.desc' });
+  return (await supabaseRequest('bikes', { query: '?select=*&order=votes.desc' })).map(normalizeBike);
 }
 
 export async function listMembers() {
@@ -141,7 +166,7 @@ export async function listEvents() {
 
 export async function listPosts() {
   if (!supabaseEnabled) return db.posts;
-  return supabaseRequest('posts', { query: '?select=*&order=created_at.desc' });
+  return (await supabaseRequest('posts', { query: '?select=*&order=created_at.desc' })).map(normalizePost);
 }
 
 export async function getAdminOverview() {
@@ -226,20 +251,33 @@ export async function createRoute(body, user) {
     db.routes.unshift(route);
     return route;
   }
-  return first(await supabaseRequest('routes', { method: 'POST', body: {
-    ...route,
+  const { createdBy: _createdBy, ...payload } = route;
+  return normalizeRoute(first(await supabaseRequest('routes', { method: 'POST', body: {
+    ...payload,
     created_by: user.id
-  } }));
+  } })));
 }
 
 export async function updateRoute(id, body) {
+  const { id: _id, createdBy: _createdBy, created_at: _createdAt, ...payload } = body;
   if (!supabaseEnabled) {
     const index = db.routes.findIndex((route) => route.id === id);
     if (index < 0) return null;
-    db.routes[index] = { ...db.routes[index], ...body };
+    db.routes[index] = { ...db.routes[index], ...payload };
     return db.routes[index];
   }
-  return first(await supabaseRequest('routes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body }));
+  return normalizeRoute(first(await supabaseRequest('routes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
+}
+
+export async function deleteRoute(id) {
+  if (!supabaseEnabled) {
+    const index = db.routes.findIndex((route) => route.id === id);
+    if (index < 0) return false;
+    db.routes.splice(index, 1);
+    return true;
+  }
+  await supabaseRequest('routes', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
+  return true;
 }
 
 export async function createPhoto(body, user) {
@@ -263,7 +301,7 @@ export async function createPhoto(body, user) {
 }
 
 export async function updatePhoto(id, body) {
-  const next = { ...body };
+  const { id: _id, created_at: _createdAt, ...next } = body;
   if (next.image) next.image = await uploadDataUrl(next.image, 'gallery');
   if (!supabaseEnabled) {
     const index = db.gallery.findIndex((photo) => photo.id === id);
@@ -272,6 +310,41 @@ export async function updatePhoto(id, body) {
     return db.gallery[index];
   }
   return first(await supabaseRequest('gallery_photos', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: next }));
+}
+
+export async function deletePhoto(id) {
+  if (!supabaseEnabled) {
+    const index = db.gallery.findIndex((photo) => photo.id === id);
+    if (index < 0) return false;
+    db.gallery.splice(index, 1);
+    return true;
+  }
+  await supabaseRequest('gallery_photos', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
+  return true;
+}
+
+export async function commentPhoto(id, body, user) {
+  const comment = {
+    id: randomUUID(),
+    author: user.nickname,
+    text: String(body.text || '').trim(),
+    createdAt: new Date().toISOString()
+  };
+  if (!comment.text) {
+    const error = new Error('Comentario requerido');
+    error.status = 400;
+    throw error;
+  }
+  if (!supabaseEnabled) {
+    const photo = db.gallery.find((item) => item.id === id);
+    if (!photo) return null;
+    photo.comments = [...(photo.comments || []), comment];
+    return photo;
+  }
+  const photo = first(await supabaseRequest('gallery_photos', { query: `?select=*&id=eq.${encodeURIComponent(id)}&limit=1` }));
+  if (!photo) return null;
+  const comments = [...(photo.comments || []), comment];
+  return first(await supabaseRequest('gallery_photos', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: { comments } }));
 }
 
 export async function reactPhoto(id) {
@@ -292,7 +365,39 @@ export async function createBike(body, user) {
     db.bikes.unshift(bike);
     return bike;
   }
-  return first(await supabaseRequest('bikes', { method: 'POST', body: { ...bike, owner_id: user.id } }));
+  const { ownerId: _ownerId, ...payload } = bike;
+  return normalizeBike(first(await supabaseRequest('bikes', { method: 'POST', body: { ...payload, owner_id: user.id } })));
+}
+
+export async function updateBike(id, body) {
+  const { id: _id, ownerId: _ownerId, created_at: _createdAt, ...payload } = body;
+  if (!supabaseEnabled) {
+    const index = db.bikes.findIndex((bike) => bike.id === id);
+    if (index < 0) return null;
+    db.bikes[index] = { ...db.bikes[index], ...payload };
+    return db.bikes[index];
+  }
+  return normalizeBike(first(await supabaseRequest('bikes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
+}
+
+export async function deleteBike(id) {
+  if (!supabaseEnabled) {
+    const index = db.bikes.findIndex((bike) => bike.id === id);
+    if (index < 0) return false;
+    db.bikes.splice(index, 1);
+    return true;
+  }
+  await supabaseRequest('bikes', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
+  return true;
+}
+
+export async function setFeaturedBike(id) {
+  if (!supabaseEnabled) {
+    db.bikes.forEach((bike) => { bike.featured = bike.id === id; });
+    return db.bikes.find((bike) => bike.id === id) || null;
+  }
+  await supabaseRequest('bikes', { method: 'PATCH', query: '?featured=eq.true', body: { featured: false }, prefer: 'return=minimal' });
+  return normalizeBike(first(await supabaseRequest('bikes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: { featured: true } })));
 }
 
 export async function voteBike(id) {
@@ -304,7 +409,7 @@ export async function voteBike(id) {
   }
   const bike = first(await supabaseRequest('bikes', { query: `?select=*&id=eq.${encodeURIComponent(id)}&limit=1` }));
   if (!bike) return null;
-  return first(await supabaseRequest('bikes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: { votes: Number(bike.votes || 0) + 1 } }));
+  return normalizeBike(first(await supabaseRequest('bikes', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: { votes: Number(bike.votes || 0) + 1 } })));
 }
 
 export async function createEvent(body, user) {
@@ -313,10 +418,38 @@ export async function createEvent(body, user) {
     db.events.unshift(event);
     return event;
   }
+  const { meetingPoint, ...payload } = event;
   return normalizeEvent(first(await supabaseRequest('events', { method: 'POST', body: {
-    ...event,
+    ...payload,
     meeting_point: event.meetingPoint
   } })));
+}
+
+export async function updateEvent(id, body) {
+  const { id: _id, created_at: _createdAt, ...basePayload } = body;
+  if (!supabaseEnabled) {
+    const index = db.events.findIndex((event) => event.id === id);
+    if (index < 0) return null;
+    db.events[index] = { ...db.events[index], ...basePayload };
+    return db.events[index];
+  }
+  const payload = { ...basePayload };
+  if (payload.meetingPoint) {
+    payload.meeting_point = payload.meetingPoint;
+    delete payload.meetingPoint;
+  }
+  return normalizeEvent(first(await supabaseRequest('events', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
+}
+
+export async function deleteEvent(id) {
+  if (!supabaseEnabled) {
+    const index = db.events.findIndex((event) => event.id === id);
+    if (index < 0) return false;
+    db.events.splice(index, 1);
+    return true;
+  }
+  await supabaseRequest('events', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
+  return true;
 }
 
 export async function attendEvent(id, user) {
@@ -331,6 +464,77 @@ export async function attendEvent(id, user) {
   const attendees = event.attendees || [];
   const nextAttendees = attendees.includes(user.nickname) ? attendees : [...attendees, user.nickname];
   return normalizeEvent(first(await supabaseRequest('events', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: { attendees: nextAttendees } })));
+}
+
+export async function createPost(body, user) {
+  const post = {
+    id: randomUUID(),
+    title: body.title,
+    author: user.nickname,
+    category: body.category || 'Experiencias',
+    excerpt: body.excerpt || '',
+    image: await uploadDataUrl(body.image, 'posts'),
+    readTime: body.readTime || body.read_time || '4 min'
+  };
+  if (!supabaseEnabled) {
+    db.posts.unshift(post);
+    return post;
+  }
+  const { readTime, ...payload } = post;
+  return normalizePost(first(await supabaseRequest('posts', { method: 'POST', body: { ...payload, read_time: readTime } })));
+}
+
+export async function updatePost(id, body) {
+  const { id: _id, created_at: _createdAt, ...payload } = body;
+  if (payload.image) payload.image = await uploadDataUrl(payload.image, 'posts');
+  if (payload.readTime) {
+    payload.read_time = payload.readTime;
+    delete payload.readTime;
+  }
+  if (!supabaseEnabled) {
+    const index = db.posts.findIndex((post) => post.id === id);
+    if (index < 0) return null;
+    db.posts[index] = { ...db.posts[index], ...body };
+    return db.posts[index];
+  }
+  return normalizePost(first(await supabaseRequest('posts', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
+}
+
+export async function deletePost(id) {
+  if (!supabaseEnabled) {
+    const index = db.posts.findIndex((post) => post.id === id);
+    if (index < 0) return false;
+    db.posts.splice(index, 1);
+    return true;
+  }
+  await supabaseRequest('posts', { method: 'DELETE', query: `?id=eq.${encodeURIComponent(id)}`, prefer: 'return=minimal' });
+  return true;
+}
+
+export async function updateMember(id, body, requester) {
+  if (requester.id !== id && !['fundador', 'administrador', 'moderador'].includes(requester.role)) {
+    const error = new Error('No autorizado');
+    error.status = 403;
+    throw error;
+  }
+  const payload = { ...body };
+  if (payload.avatar) payload.avatar = await uploadDataUrl(payload.avatar, 'avatars');
+  if (payload.joinedAt) {
+    payload.joined_at = payload.joinedAt;
+    delete payload.joinedAt;
+  }
+  delete payload.email;
+  delete payload.password;
+  delete payload.id;
+  delete payload.created_at;
+  if (!['fundador', 'administrador'].includes(requester.role)) delete payload.role;
+  if (!supabaseEnabled) {
+    const index = db.users.findIndex((member) => member.id === id);
+    if (index < 0) return null;
+    db.users[index] = { ...db.users[index], ...payload };
+    return publicUser(db.users[index]);
+  }
+  return publicUser(first(await supabaseRequest('members', { method: 'PATCH', query: `?id=eq.${encodeURIComponent(id)}&select=*`, body: payload })));
 }
 
 export { publicUser };

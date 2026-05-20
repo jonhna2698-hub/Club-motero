@@ -7,10 +7,17 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   attendEvent,
+  commentPhoto,
   createBike,
   createEvent,
   createPhoto,
+  createPost,
   createRoute,
+  deleteBike,
+  deleteEvent,
+  deletePhoto,
+  deletePost,
+  deleteRoute,
   getAdminOverview,
   getHealth,
   getStats,
@@ -24,7 +31,12 @@ import {
   publicUser,
   reactPhoto,
   registerMember,
+  setFeaturedBike,
+  updateBike,
+  updateEvent,
+  updateMember,
   updatePhoto,
+  updatePost,
   updateRoute,
   voteBike
 } from './store.js';
@@ -58,6 +70,13 @@ function auth(req, res, next) {
   } catch {
     res.status(401).json({ message: 'Token invalido' });
   }
+}
+
+function requireAdmin(req, res, next) {
+  if (!['fundador', 'administrador', 'moderador'].includes(req.user?.role)) {
+    return res.status(403).json({ message: 'Permiso requerido' });
+  }
+  next();
 }
 
 function asyncRoute(handler) {
@@ -99,6 +118,11 @@ app.patch('/api/routes/:id', auth, asyncRoute(async (req, res) => {
   res.json(route);
 }));
 
+app.delete('/api/routes/:id', auth, requireAdmin, asyncRoute(async (req, res) => {
+  await deleteRoute(req.params.id);
+  res.json({ ok: true });
+}));
+
 app.post('/api/gallery', auth, upload.single('image'), asyncRoute(async (req, res) => {
   const photo = await createPhoto({
     ...req.body,
@@ -111,6 +135,17 @@ app.patch('/api/gallery/:id', auth, asyncRoute(async (req, res) => {
   const photo = await updatePhoto(req.params.id, req.body);
   if (!photo) return res.status(404).json({ message: 'Foto no encontrada' });
   res.json(photo);
+}));
+
+app.delete('/api/gallery/:id', auth, asyncRoute(async (req, res) => {
+  await deletePhoto(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.post('/api/gallery/:id/comments', auth, asyncRoute(async (req, res) => {
+  const photo = await commentPhoto(req.params.id, req.body, req.user);
+  if (!photo) return res.status(404).json({ message: 'Foto no encontrada' });
+  res.status(201).json(photo);
 }));
 
 app.post('/api/gallery/:id/react', asyncRoute(async (req, res) => {
@@ -129,6 +164,23 @@ app.post('/api/bikes/:id/vote', asyncRoute(async (req, res) => {
   res.json(bike);
 }));
 
+app.patch('/api/bikes/:id', auth, asyncRoute(async (req, res) => {
+  const bike = await updateBike(req.params.id, req.body);
+  if (!bike) return res.status(404).json({ message: 'Moto no encontrada' });
+  res.json(bike);
+}));
+
+app.delete('/api/bikes/:id', auth, requireAdmin, asyncRoute(async (req, res) => {
+  await deleteBike(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.post('/api/bikes/:id/featured', auth, requireAdmin, asyncRoute(async (req, res) => {
+  const bike = await setFeaturedBike(req.params.id);
+  if (!bike) return res.status(404).json({ message: 'Moto no encontrada' });
+  res.json(bike);
+}));
+
 app.post('/api/events', auth, asyncRoute(async (req, res) => {
   res.status(201).json(await createEvent(req.body, req.user));
 }));
@@ -137,6 +189,38 @@ app.post('/api/events/:id/attend', auth, asyncRoute(async (req, res) => {
   const event = await attendEvent(req.params.id, req.user);
   if (!event) return res.status(404).json({ message: 'Evento no encontrado' });
   res.json(event);
+}));
+
+app.patch('/api/events/:id', auth, requireAdmin, asyncRoute(async (req, res) => {
+  const event = await updateEvent(req.params.id, req.body);
+  if (!event) return res.status(404).json({ message: 'Evento no encontrado' });
+  res.json(event);
+}));
+
+app.delete('/api/events/:id', auth, requireAdmin, asyncRoute(async (req, res) => {
+  await deleteEvent(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.post('/api/posts', auth, asyncRoute(async (req, res) => {
+  res.status(201).json(await createPost(req.body, req.user));
+}));
+
+app.patch('/api/posts/:id', auth, asyncRoute(async (req, res) => {
+  const post = await updatePost(req.params.id, req.body);
+  if (!post) return res.status(404).json({ message: 'Post no encontrado' });
+  res.json(post);
+}));
+
+app.delete('/api/posts/:id', auth, requireAdmin, asyncRoute(async (req, res) => {
+  await deletePost(req.params.id);
+  res.json({ ok: true });
+}));
+
+app.patch('/api/members/:id', auth, asyncRoute(async (req, res) => {
+  const member = await updateMember(req.params.id, req.body, req.user);
+  if (!member) return res.status(404).json({ message: 'Miembro no encontrado' });
+  res.json(member);
 }));
 
 app.get('/api/admin/overview', auth, asyncRoute(async (req, res) => {

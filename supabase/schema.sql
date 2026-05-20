@@ -11,6 +11,7 @@ create table if not exists members (
   bike text default 'Por registrar',
   routes integer default 0,
   km integer default 0,
+  description text default '',
   created_at timestamptz not null default now()
 );
 
@@ -43,6 +44,7 @@ create table if not exists gallery_photos (
   image text not null,
   reactions integer not null default 0,
   comments jsonb not null default '[]'::jsonb,
+  approved boolean not null default true,
   created_at timestamptz not null default now()
 );
 
@@ -86,8 +88,13 @@ create table if not exists posts (
   excerpt text not null,
   image text,
   read_time text,
+  approved boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+alter table members add column if not exists description text default '';
+alter table gallery_photos add column if not exists approved boolean not null default true;
+alter table posts add column if not exists approved boolean not null default true;
 
 insert into members (id, name, nickname, email, password_hash, role, avatar, joined_at, socials, bike, routes, km)
 values
