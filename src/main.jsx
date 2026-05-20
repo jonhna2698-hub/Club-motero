@@ -32,7 +32,7 @@ import {
   Zap
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { MapContainer, Marker, Polyline, Popup, TileLayer } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -88,6 +88,17 @@ function readImageFile(file, maxMb = 5) {
     reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
     reader.readAsDataURL(file);
   });
+}
+
+function validPoint(point) {
+  return Array.isArray(point)
+    && point.length === 2
+    && Number.isFinite(Number(point[0]))
+    && Number.isFinite(Number(point[1]));
+}
+
+function cleanPoints(points) {
+  return (Array.isArray(points) ? points : []).filter(validPoint).map((point) => [Number(point[0]), Number(point[1])]);
 }
 
 function useClubData() {
@@ -186,7 +197,7 @@ function App() {
           onEditRoute={(route) => auth ? setEditingRoute(route) : setAuthOpen(true)}
           onCreateRoute={() => {
             if (!auth) return setAuthOpen(true);
-            setEditingRoute({ id: null, name: '', type: 'costera', date: new Date().toISOString().slice(0, 10), distance: 0, duration: '2h', participants: 1, difficulty: 'facil', weather: '', description: '', start: [-12.0464, -77.0428], points: [[-12.0464, -77.0428]], photos: [], comments: [] });
+            setEditingRoute({ id: null, name: '', type: 'costera', date: new Date().toISOString().slice(0, 10), distance: 0, duration: '2h', participants: 1, difficulty: 'facil', weather: '', description: '', start: [], points: [], photos: [], comments: [] });
           }}
           isAdmin={isAdmin}
         />
@@ -591,7 +602,8 @@ function MiniPanel({ title, text, icon }) {
 }
 
 function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setActiveDifficulty, onEditRoute, onCreateRoute, isAdmin }) {
-  const center = routes[0]?.start || [-12.0464, -77.0428];
+  const routePoints = routes.flatMap((route) => cleanPoints(route.points));
+  const center = routePoints[0] || cleanPoints([routes[0]?.start])[0] || [-12.0464, -77.0428];
 
   return (
     <section id="rutas" className="section route-section">
@@ -612,21 +624,13 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
       <div className="map-layout">
         <div className="map-frame">
           <MapContainer center={center} zoom={8} scrollWheelZoom className="leaflet-map">
+            <FitBounds points={routePoints} />
             <TileLayer
               attribution="&copy; OpenStreetMap"
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             {routes.map((route) => (
-              <React.Fragment key={route.id}>
-                <Polyline positions={route.points} pathOptions={{ color: '#ff243d', weight: 5, opacity: 0.85 }} />
-                <Marker position={route.start}>
-                  <Popup>
-                    <strong>{route.name}</strong><br />
-                    {route.distance} km | {route.difficulty}<br />
-                    {route.weather}
-                  </Popup>
-                </Marker>
-              </React.Fragment>
+              <RouteOverlay route={route} key={route.id} />
             ))}
           </MapContainer>
         </div>
@@ -654,6 +658,52 @@ function RoutesMap({ routes, activeRoute, setActiveRoute, activeDifficulty, setA
         </div>
       </div>
     </section>
+  );
+}
+
+function FitBounds({ points }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const clean = cleanPoints(points);
+    if (clean.length === 0) return;
+    if (clean.length === 1) {
+      map.setView(clean[0], 10);
+      return;
+    }
+    map.fitBounds(clean, { padding: [34, 34], maxZoom: 11 });
+  }, [map, points]);
+
+  return null;
+}
+
+function RouteOverlay({ route }) {
+  const points = cleanPoints(route.points);
+  const start = cleanPoints([route.start])[0] || points[0];
+  if (points.length === 0 && !start) return null;
+
+  return (
+    <React.Fragment>
+      {points.length > 1 && <Polyline positions={points} pathOptions={{ color: '#ff243d', weight: 5, opacity: 0.85 }} />}
+      {points.map((point, index) => (
+        <Marker position={point} key={`${route.id}-${index}`}>
+          <Popup>
+            <strong>{route.name}</strong><br />
+            Punto {index + 1} | {route.difficulty}<br />
+            {route.weather}
+          </Popup>
+        </Marker>
+      ))}
+      {points.length === 0 && start && (
+        <Marker position={start}>
+          <Popup>
+            <strong>{route.name}</strong><br />
+            {route.distance} km | {route.difficulty}<br />
+            {route.weather}
+          </Popup>
+        </Marker>
+      )}
+    </React.Fragment>
   );
 }
 
@@ -981,16 +1031,41 @@ function EditRouteModal({ route, onClose, onSave }) {
     participants: route.participants,
     difficulty: route.difficulty,
     weather: route.weather,
-    description: route.description
+    description: route.description,
+    start: cleanPoints([route.start])[0] || [],
+    points: cleanPoints(route.points),
+    photos: route.photos || [],
+    comments: route.comments || []
   });
+  const [manualPoint, setManualPoint] = useState({ lat: '', lng: '' });
+
+  function setPoints(points) {
+    const nextPoints = cleanPoints(points);
+    setForm((current) => ({
+      ...current,
+      points: nextPoints,
+      start: nextPoints[0] || []
+    }));
+  }
+
+  function addManualPoint() {
+    const lat = Number(manualPoint.lat);
+    const lng = Number(manualPoint.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    setPoints([...form.points, [lat, lng]]);
+    setManualPoint({ lat: '', lng: '' });
+  }
 
   function submit(event) {
     event.preventDefault();
+    const points = cleanPoints(form.points);
     onSave({
       ...route,
       ...form,
       distance: Number(form.distance),
-      participants: Number(form.participants)
+      participants: Number(form.participants),
+      start: points[0] || [],
+      points
     });
   }
 
@@ -1006,10 +1081,66 @@ function EditRouteModal({ route, onClose, onSave }) {
         <label>Dificultad<input required value={form.difficulty} onChange={(event) => setForm({ ...form, difficulty: event.target.value })} /></label>
         <label>Clima<input required value={form.weather} onChange={(event) => setForm({ ...form, weather: event.target.value })} /></label>
         <label className="wide-field">Descripcion<input required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+        <div className="wide-field route-editor-map">
+          <RoutePointPicker points={form.points} setPoints={setPoints} />
+        </div>
+        <div className="wide-field coordinate-tools">
+          <label>Latitud<input value={manualPoint.lat} onChange={(event) => setManualPoint({ ...manualPoint, lat: event.target.value })} placeholder="-12.0464" /></label>
+          <label>Longitud<input value={manualPoint.lng} onChange={(event) => setManualPoint({ ...manualPoint, lng: event.target.value })} placeholder="-77.0428" /></label>
+          <button className="ghost-button small" type="button" onClick={addManualPoint}><MapPin size={16} /> Agregar punto</button>
+          <button className="danger-button small" type="button" onClick={() => setPoints([])}><Trash2 size={16} /> Limpiar puntos</button>
+        </div>
+        <div className="wide-field point-list">
+          {form.points.length === 0 ? (
+            <p>Haz clic en el mapa para marcar inicio, paradas y destino. La ruta se dibuja en el orden de los clics.</p>
+          ) : form.points.map((point, index) => (
+            <span key={`${point[0]}-${point[1]}-${index}`}>
+              {index + 1}. {point[0].toFixed(5)}, {point[1].toFixed(5)}
+              <button type="button" onClick={() => setPoints(form.points.filter((_, pointIndex) => pointIndex !== index))}>Quitar</button>
+            </span>
+          ))}
+        </div>
         <button className="primary-button wide-field" type="submit"><Edit3 size={17} /> Guardar ruta</button>
       </form>
     </Modal>
   );
+}
+
+function RoutePointPicker({ points, setPoints }) {
+  const clean = cleanPoints(points);
+  const center = clean[0] || [-12.0464, -77.0428];
+
+  return (
+    <div>
+      <div className="route-editor-help">
+        <strong>Elegir ubicaciones</strong>
+        <span>Haz clic en el mapa para agregar puntos. El primer punto es el inicio; el ultimo es el destino.</span>
+      </div>
+      <MapContainer center={center} zoom={9} scrollWheelZoom className="route-picker-map">
+        <FitBounds points={clean} />
+        <RouteMapClick onAdd={(point) => setPoints([...clean, point])} />
+        <TileLayer
+          attribution="&copy; OpenStreetMap"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        {clean.length > 1 && <Polyline positions={clean} pathOptions={{ color: '#ff243d', weight: 5, opacity: 0.9 }} />}
+        {clean.map((point, index) => (
+          <Marker position={point} key={`${point[0]}-${point[1]}-${index}`}>
+            <Popup>{index === 0 ? 'Inicio' : index === clean.length - 1 ? 'Destino' : `Parada ${index}`}</Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+    </div>
+  );
+}
+
+function RouteMapClick({ onAdd }) {
+  useMapEvents({
+    click(event) {
+      onAdd([Number(event.latlng.lat.toFixed(6)), Number(event.latlng.lng.toFixed(6))]);
+    }
+  });
+  return null;
 }
 
 function BikeModal({ bike, onClose, onSave }) {

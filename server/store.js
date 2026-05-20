@@ -246,7 +246,8 @@ export async function loginMember({ email, password }) {
 }
 
 export async function createRoute(body, user) {
-  const route = { id: randomUUID(), createdBy: user.id, ...body };
+  const { id: _id, created_at: _createdAt, ...safeBody } = body;
+  const route = { ...safeBody, id: randomUUID(), createdBy: user.id };
   if (!supabaseEnabled) {
     db.routes.unshift(route);
     return route;
@@ -360,12 +361,13 @@ export async function reactPhoto(id) {
 }
 
 export async function createBike(body, user) {
-  const bike = { id: randomUUID(), ownerId: user.id, votes: 0, ...body };
+  const { id: _id, created_at: _createdAt, ownerId: _ownerId, ...safeBody } = body;
+  const bike = { ...safeBody, id: randomUUID(), ownerId: user.id, votes: 0 };
   if (!supabaseEnabled) {
     db.bikes.unshift(bike);
     return bike;
   }
-  const { ownerId: _ownerId, ...payload } = bike;
+  const { ownerId: _generatedOwnerId, ...payload } = bike;
   return normalizeBike(first(await supabaseRequest('bikes', { method: 'POST', body: { ...payload, owner_id: user.id } })));
 }
 
@@ -413,7 +415,8 @@ export async function voteBike(id) {
 }
 
 export async function createEvent(body, user) {
-  const event = { id: randomUUID(), attendees: [user.nickname], ...body };
+  const { id: _id, created_at: _createdAt, ...safeBody } = body;
+  const event = { ...safeBody, id: randomUUID(), attendees: [user.nickname, ...(safeBody.attendees || [])].filter((item, index, arr) => item && arr.indexOf(item) === index) };
   if (!supabaseEnabled) {
     db.events.unshift(event);
     return event;
