@@ -1,6 +1,6 @@
 # Rapidos y Precoces
 
-Plataforma full stack para club de motociclistas con frontend React, API local Express, API serverless para Netlify, JWT, mapa Leaflet, catalogo de motos, galeria social, eventos, blog y panel admin.
+Plataforma full stack para club de motociclistas con frontend React, API local Express, API serverless para Netlify, JWT, Supabase PostgreSQL/Storage, mapa Leaflet, catalogo de motos, galeria social, eventos, blog y panel admin.
 
 ## Abrir en local
 
@@ -33,8 +33,55 @@ admin123
 - Los datos actuales son semilla en memoria para poder ejecutar el proyecto sin configurar base de datos.
 - En local, la API corre con Express en `server/index.js`.
 - En Netlify, la API corre como serverless function en `netlify/functions/api.mjs`.
-- El siguiente paso natural es conectar PostgreSQL, MongoDB, Supabase o Neon y reemplazar `server/seed.js` por modelos persistentes.
+- Si configuras Supabase, la API persiste usuarios, fotos, rutas, votos, reacciones y asistencias.
+- Si no configuras Supabase, la API usa `server/seed.js` como fallback en memoria.
 - Las imagenes usan URLs remotas optimizadas para prototipo visual.
+
+## Supabase
+
+1. Crea un proyecto en Supabase.
+2. Abre `SQL Editor`.
+3. Copia y ejecuta el contenido de:
+
+```text
+supabase/schema.sql
+```
+
+4. Crea un bucket publico en `Storage` llamado:
+
+```text
+club-photos
+```
+
+5. En local, crea `.env` basado en `.env.example`:
+
+```text
+PORT=4000
+JWT_SECRET=una-clave-larga-y-segura
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key
+SUPABASE_PHOTOS_BUCKET=club-photos
+```
+
+Usa `service_role`, no `anon`, porque la API del servidor necesita escribir en tablas y Storage. No expongas esa clave en el frontend.
+
+6. Reinicia el servidor:
+
+```bash
+npm run dev
+```
+
+Para confirmar que esta usando Supabase, abre:
+
+```text
+http://localhost:4000/api/health
+```
+
+Debe responder:
+
+```json
+{"database":"supabase"}
+```
 
 ## Subir a GitHub
 
@@ -66,6 +113,9 @@ Functions directory: netlify/functions
 
 ```text
 JWT_SECRET=una-clave-larga-y-segura
+SUPABASE_URL=https://tu-proyecto.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key
+SUPABASE_PHOTOS_BUCKET=club-photos
 ```
 
 La API publica queda disponible bajo:
@@ -81,4 +131,4 @@ La API publica queda disponible bajo:
 /api/posts
 ```
 
-Importante: la API serverless usa datos en memoria para demo. Para datos permanentes en produccion, conecta una base de datos externa.
+Importante: si no agregas las variables de Supabase, la API serverless usa datos en memoria para demo.

@@ -2,19 +2,38 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
 import multer from 'multer';
 import path from 'path';
-import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { seed } from './seed.js';
+import {
+  attendEvent,
+  createBike,
+  createEvent,
+  createPhoto,
+  createRoute,
+  getAdminOverview,
+  getHealth,
+  getStats,
+  listBikes,
+  listEvents,
+  listGallery,
+  listMembers,
+  listPosts,
+  listRoutes,
+  loginMember,
+  publicUser,
+  reactPhoto,
+  registerMember,
+  updatePhoto,
+  updateRoute,
+  voteBike
+} from './store.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const db = structuredClone(seed);
 
 const storage = multer.diskStorage({
   destination: path.join(__dirname, '..', 'uploads'),
@@ -25,11 +44,6 @@ const upload = multer({ storage });
 app.use(cors());
 app.use(express.json({ limit: '8mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
-
-function publicUser(user) {
-  const { passwordHash: _passwordHash, ...safe } = user;
-  return safe;
-}
 
 function signUser(user) {
   return jwt.sign({ id: user.id, role: user.role, nickname: user.nickname }, JWT_SECRET, { expiresIn: '7d' });
@@ -46,89 +60,91 @@ function auth(req, res, next) {
   }
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, club: 'Rapidos y Precoces' }));
-app.get('/api/stats', (_req, res) => res.json(db.stats));
-app.get('/api/routes', (_req, res) => res.json(db.routes));
-app.get('/api/gallery', (_req, res) => res.json(db.gallery));
-app.get('/api/bikes', (_req, res) => res.json(db.bikes));
-app.get('/api/members', (_req, res) => res.json(db.users.map(publicUser)));
-app.get('/api/events', (_req, res) => res.json(db.events));
-app.get('/api/posts', (_req, res) => res.json(db.posts));
-
-app.post('/api/auth/register', async (req, res) => {
-  const { name, nickname, email, password } = req.body;
-  if (!email || !password || !nickname) return res.status(400).json({ message: 'Datos incompletos' });
-  if (db.users.some((user) => user.email === email)) return res.status(409).json({ message: 'Email ya registrado' });
-  const user = {
-    id: randomUUID(),
-    name: name || nickname,
-    nickname,
-    email,
-    passwordHash: await bcrypt.hash(password, 10),
-    role: 'integrante',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80',
-    joinedAt: new Date().toISOString().slice(0, 10),
-    socials: '',
-    bike: 'Por registrar',
-    routes: 0,
-    km: 0
+function asyncRoute(handler) {
+  return async (req, res) => {
+    try {
+      await handler(req, res);
+    } catch (error) {
+      res.status(error.status || 500).json({ message: error.message || 'Error interno' });
+    }
   };
-  db.users.push(user);
+}
+
+app.get('/api/health', asyncRoute(async (_req, res) => res.json(await getHealth())));
+app.get('/api/stats', asyncRoute(async (_req, res) => res.json(await getStats())));
+app.get('/api/routes', asyncRoute(async (_req, res) => res.json(await listRoutes())));
+app.get('/api/gallery', asyncRoute(async (_req, res) => res.json(await listGallery())));
+app.get('/api/bikes', asyncRoute(async (_req, res) => res.json(await listBikes())));
+app.get('/api/members', asyncRoute(async (_req, res) => res.json(await listMembers())));
+app.get('/api/events', asyncRoute(async (_req, res) => res.json(await listEvents())));
+app.get('/api/posts', asyncRoute(async (_req, res) => res.json(await listPosts())));
+
+app.post('/api/auth/register', asyncRoute(async (req, res) => {
+  const user = await registerMember(req.body);
   res.status(201).json({ token: signUser(user), user: publicUser(user) });
-});
+}));
 
-app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body;
-  const user = db.users.find((item) => item.email === email);
-  const validPassword = user?.passwordHash?.startsWith('$2')
-    ? await bcrypt.compare(password, user.passwordHash)
-    : user?.passwordHash === password;
-  if (!user || !validPassword) {
-    return res.status(401).json({ message: 'Credenciales invalidas' });
-  }
+app.post('/api/auth/login', asyncRoute(async (req, res) => {
+  const user = await loginMember(req.body);
   res.json({ token: signUser(user), user: publicUser(user) });
-});
+}));
 
-app.post('/api/routes', auth, (req, res) => {
-  const route = { id: randomUUID(), createdBy: req.user.id, ...req.body };
-  db.routes.unshift(route);
-  res.status(201).json(route);
-});
+app.post('/api/routes', auth, asyncRoute(async (req, res) => {
+  res.status(201).json(await createRoute(req.body, req.user));
+}));
 
-app.post('/api/gallery', auth, upload.single('image'), (req, res) => {
-  const photo = {
-    id: randomUUID(),
-    image: req.file ? `/uploads/${req.file.filename}` : req.body.image,
-    title: req.body.title || 'Nueva foto biker',
-    author: req.user.nickname,
-    moto: req.body.moto || 'Moto registrada',
-    event: req.body.event || 'Rodada',
-    location: req.body.location || 'Ruta registrada',
-    reactions: 0,
-    comments: []
-  };
-  db.gallery.unshift(photo);
+app.patch('/api/routes/:id', auth, asyncRoute(async (req, res) => {
+  const route = await updateRoute(req.params.id, req.body);
+  if (!route) return res.status(404).json({ message: 'Ruta no encontrada' });
+  res.json(route);
+}));
+
+app.post('/api/gallery', auth, upload.single('image'), asyncRoute(async (req, res) => {
+  const photo = await createPhoto({
+    ...req.body,
+    image: req.file ? `/uploads/${req.file.filename}` : req.body.image
+  }, req.user);
   res.status(201).json(photo);
-});
+}));
 
-app.post('/api/bikes', auth, (req, res) => {
-  const bike = { id: randomUUID(), ownerId: req.user.id, votes: 0, ...req.body };
-  db.bikes.unshift(bike);
-  res.status(201).json(bike);
-});
+app.patch('/api/gallery/:id', auth, asyncRoute(async (req, res) => {
+  const photo = await updatePhoto(req.params.id, req.body);
+  if (!photo) return res.status(404).json({ message: 'Foto no encontrada' });
+  res.json(photo);
+}));
 
-app.post('/api/events', auth, (req, res) => {
-  const event = { id: randomUUID(), attendees: [req.user.nickname], ...req.body };
-  db.events.unshift(event);
-  res.status(201).json(event);
-});
+app.post('/api/gallery/:id/react', asyncRoute(async (req, res) => {
+  const photo = await reactPhoto(req.params.id);
+  if (!photo) return res.status(404).json({ message: 'Foto no encontrada' });
+  res.json(photo);
+}));
 
-app.get('/api/admin/overview', auth, (req, res) => {
+app.post('/api/bikes', auth, asyncRoute(async (req, res) => {
+  res.status(201).json(await createBike(req.body, req.user));
+}));
+
+app.post('/api/bikes/:id/vote', asyncRoute(async (req, res) => {
+  const bike = await voteBike(req.params.id);
+  if (!bike) return res.status(404).json({ message: 'Moto no encontrada' });
+  res.json(bike);
+}));
+
+app.post('/api/events', auth, asyncRoute(async (req, res) => {
+  res.status(201).json(await createEvent(req.body, req.user));
+}));
+
+app.post('/api/events/:id/attend', auth, asyncRoute(async (req, res) => {
+  const event = await attendEvent(req.params.id, req.user);
+  if (!event) return res.status(404).json({ message: 'Evento no encontrado' });
+  res.json(event);
+}));
+
+app.get('/api/admin/overview', auth, asyncRoute(async (req, res) => {
   if (!['fundador', 'administrador', 'moderador'].includes(req.user.role)) {
     return res.status(403).json({ message: 'Permiso requerido' });
   }
-  res.json(db.admin);
-});
+  res.json(await getAdminOverview());
+}));
 
 app.listen(PORT, () => {
   console.log(`API Rapidos y Precoces lista en http://localhost:${PORT}`);

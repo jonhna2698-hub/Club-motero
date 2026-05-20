@@ -1,10 +1,29 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
-import { randomUUID } from 'crypto';
-import { seed } from '../../server/seed.js';
+import {
+  attendEvent,
+  createBike,
+  createEvent,
+  createPhoto,
+  createRoute,
+  getAdminOverview,
+  getHealth,
+  getStats,
+  listBikes,
+  listEvents,
+  listGallery,
+  listMembers,
+  listPosts,
+  listRoutes,
+  loginMember,
+  publicUser,
+  reactPhoto,
+  registerMember,
+  updatePhoto,
+  updateRoute,
+  voteBike
+} from '../../server/store.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'netlify-dev-secret-change-me';
-const db = structuredClone(seed);
 
 export const config = {
   path: '/api/*'
@@ -16,14 +35,9 @@ function json(body, status = 200) {
     headers: {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS'
     }
   });
-}
-
-function publicUser(user) {
-  const { passwordHash: _passwordHash, ...safe } = user;
-  return safe;
 }
 
 function signUser(user) {
@@ -61,105 +75,91 @@ async function readBody(request) {
   return {};
 }
 
+function requireUser(request) {
+  const user = getAuthUser(request);
+  if (!user) {
+    const error = new Error('Token requerido');
+    error.status = 401;
+    throw error;
+  }
+  return user;
+}
+
 export default async function handler(request) {
-  if (request.method === 'OPTIONS') return json({});
+  try {
+    if (request.method === 'OPTIONS') return json({});
 
-  const path = getApiPath(request);
-  const method = request.method;
+    const path = getApiPath(request);
+    const method = request.method;
 
-  if (method === 'GET' && path === '/health') return json({ ok: true, club: 'Rapidos y Precoces', runtime: 'netlify' });
-  if (method === 'GET' && path === '/stats') return json(db.stats);
-  if (method === 'GET' && path === '/routes') return json(db.routes);
-  if (method === 'GET' && path === '/gallery') return json(db.gallery);
-  if (method === 'GET' && path === '/bikes') return json(db.bikes);
-  if (method === 'GET' && path === '/members') return json(db.users.map(publicUser));
-  if (method === 'GET' && path === '/events') return json(db.events);
-  if (method === 'GET' && path === '/posts') return json(db.posts);
+    if (method === 'GET' && path === '/health') return json(await getHealth());
+    if (method === 'GET' && path === '/stats') return json(await getStats());
+    if (method === 'GET' && path === '/routes') return json(await listRoutes());
+    if (method === 'GET' && path === '/gallery') return json(await listGallery());
+    if (method === 'GET' && path === '/bikes') return json(await listBikes());
+    if (method === 'GET' && path === '/members') return json(await listMembers());
+    if (method === 'GET' && path === '/events') return json(await listEvents());
+    if (method === 'GET' && path === '/posts') return json(await listPosts());
 
-  if (method === 'POST' && path === '/auth/register') {
-    const { name, nickname, email, password } = await readBody(request);
-    if (!email || !password || !nickname) return json({ message: 'Datos incompletos' }, 400);
-    if (db.users.some((user) => user.email === email)) return json({ message: 'Email ya registrado' }, 409);
-
-    const user = {
-      id: randomUUID(),
-      name: name || nickname,
-      nickname,
-      email,
-      passwordHash: await bcrypt.hash(password, 10),
-      role: 'integrante',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80',
-      joinedAt: new Date().toISOString().slice(0, 10),
-      socials: '',
-      bike: 'Por registrar',
-      routes: 0,
-      km: 0
-    };
-    db.users.push(user);
-    return json({ token: signUser(user), user: publicUser(user) }, 201);
-  }
-
-  if (method === 'POST' && path === '/auth/login') {
-    const { email, password } = await readBody(request);
-    const user = db.users.find((item) => item.email === email);
-    const validPassword = user?.passwordHash?.startsWith('$2')
-      ? await bcrypt.compare(password, user.passwordHash)
-      : user?.passwordHash === password;
-    if (!user || !validPassword) return json({ message: 'Credenciales invalidas' }, 401);
-    return json({ token: signUser(user), user: publicUser(user) });
-  }
-
-  if (method === 'POST' && path === '/routes') {
-    const user = getAuthUser(request);
-    if (!user) return json({ message: 'Token requerido' }, 401);
-    const route = { id: randomUUID(), createdBy: user.id, ...(await readBody(request)) };
-    db.routes.unshift(route);
-    return json(route, 201);
-  }
-
-  if (method === 'POST' && path === '/gallery') {
-    const user = getAuthUser(request);
-    if (!user) return json({ message: 'Token requerido' }, 401);
-    const body = await readBody(request);
-    const photo = {
-      id: randomUUID(),
-      image: body.image || 'https://images.unsplash.com/photo-1558981852-426c6c22a060?auto=format&fit=crop&w=900&q=80',
-      title: body.title || 'Nueva foto biker',
-      author: user.nickname,
-      moto: body.moto || 'Moto registrada',
-      event: body.event || 'Rodada',
-      location: body.location || 'Ruta registrada',
-      reactions: 0,
-      comments: []
-    };
-    db.gallery.unshift(photo);
-    return json(photo, 201);
-  }
-
-  if (method === 'POST' && path === '/bikes') {
-    const user = getAuthUser(request);
-    if (!user) return json({ message: 'Token requerido' }, 401);
-    const bike = { id: randomUUID(), ownerId: user.id, votes: 0, ...(await readBody(request)) };
-    db.bikes.unshift(bike);
-    return json(bike, 201);
-  }
-
-  if (method === 'POST' && path === '/events') {
-    const user = getAuthUser(request);
-    if (!user) return json({ message: 'Token requerido' }, 401);
-    const event = { id: randomUUID(), attendees: [user.nickname], ...(await readBody(request)) };
-    db.events.unshift(event);
-    return json(event, 201);
-  }
-
-  if (method === 'GET' && path === '/admin/overview') {
-    const user = getAuthUser(request);
-    if (!user) return json({ message: 'Token requerido' }, 401);
-    if (!['fundador', 'administrador', 'moderador'].includes(user.role)) {
-      return json({ message: 'Permiso requerido' }, 403);
+    if (method === 'POST' && path === '/auth/register') {
+      const user = await registerMember(await readBody(request));
+      return json({ token: signUser(user), user: publicUser(user) }, 201);
     }
-    return json(db.admin);
-  }
 
-  return json({ message: `Endpoint no encontrado: ${method} ${path}` }, 404);
+    if (method === 'POST' && path === '/auth/login') {
+      const user = await loginMember(await readBody(request));
+      return json({ token: signUser(user), user: publicUser(user) });
+    }
+
+    if (method === 'POST' && path === '/routes') return json(await createRoute(await readBody(request), requireUser(request)), 201);
+
+    const routePatch = path.match(/^\/routes\/([^/]+)$/);
+    if (method === 'PATCH' && routePatch) {
+      const route = await updateRoute(routePatch[1], await readBody(request));
+      return route ? json(route) : json({ message: 'Ruta no encontrada' }, 404);
+    }
+
+    if (method === 'POST' && path === '/gallery') return json(await createPhoto(await readBody(request), requireUser(request)), 201);
+
+    const galleryPatch = path.match(/^\/gallery\/([^/]+)$/);
+    if (method === 'PATCH' && galleryPatch) {
+      requireUser(request);
+      const photo = await updatePhoto(galleryPatch[1], await readBody(request));
+      return photo ? json(photo) : json({ message: 'Foto no encontrada' }, 404);
+    }
+
+    const galleryReact = path.match(/^\/gallery\/([^/]+)\/react$/);
+    if (method === 'POST' && galleryReact) {
+      const photo = await reactPhoto(galleryReact[1]);
+      return photo ? json(photo) : json({ message: 'Foto no encontrada' }, 404);
+    }
+
+    if (method === 'POST' && path === '/bikes') return json(await createBike(await readBody(request), requireUser(request)), 201);
+
+    const bikeVote = path.match(/^\/bikes\/([^/]+)\/vote$/);
+    if (method === 'POST' && bikeVote) {
+      const bike = await voteBike(bikeVote[1]);
+      return bike ? json(bike) : json({ message: 'Moto no encontrada' }, 404);
+    }
+
+    if (method === 'POST' && path === '/events') return json(await createEvent(await readBody(request), requireUser(request)), 201);
+
+    const eventAttend = path.match(/^\/events\/([^/]+)\/attend$/);
+    if (method === 'POST' && eventAttend) {
+      const event = await attendEvent(eventAttend[1], requireUser(request));
+      return event ? json(event) : json({ message: 'Evento no encontrado' }, 404);
+    }
+
+    if (method === 'GET' && path === '/admin/overview') {
+      const user = requireUser(request);
+      if (!['fundador', 'administrador', 'moderador'].includes(user.role)) {
+        return json({ message: 'Permiso requerido' }, 403);
+      }
+      return json(await getAdminOverview());
+    }
+
+    return json({ message: `Endpoint no encontrado: ${method} ${path}` }, 404);
+  } catch (error) {
+    return json({ message: error.message || 'Error interno' }, error.status || 500);
+  }
 }

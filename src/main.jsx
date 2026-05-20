@@ -59,6 +59,21 @@ async function getJson(path) {
   return response.json();
 }
 
+async function sendJson(path, options = {}) {
+  const { token, headers, ...requestOptions } = options;
+  const response = await fetch(`${API}${path}`, {
+    ...requestOptions,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(headers || {})
+    }
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.message || 'Error de API');
+  return payload;
+}
+
 function useClubData() {
   const [data, setData] = useState({
     stats: null,
@@ -138,10 +153,19 @@ function App() {
             setUploadOpen(true);
           }}
           onReact={(id) => {
-            setData((current) => ({
-              ...current,
-              gallery: current.gallery.map((photo) => photo.id === id ? { ...photo, reactions: photo.reactions + 1 } : photo)
-            }));
+            sendJson(`/gallery/${id}/react`, { method: 'POST' })
+              .then((updatedPhoto) => {
+                setData((current) => ({
+                  ...current,
+                  gallery: current.gallery.map((photo) => photo.id === id ? updatedPhoto : photo)
+                }));
+              })
+              .catch(() => {
+                setData((current) => ({
+                  ...current,
+                  gallery: current.gallery.map((photo) => photo.id === id ? { ...photo, reactions: photo.reactions + 1 } : photo)
+                }));
+              });
           }}
           onEdit={setEditingPhoto}
           onOpen={setViewingPhoto}
@@ -149,10 +173,19 @@ function App() {
         <Bikes
           bikes={data.bikes}
           onVote={(id) => {
-            setData((current) => ({
-              ...current,
-              bikes: current.bikes.map((bike) => bike.id === id ? { ...bike, votes: bike.votes + 1 } : bike)
-            }));
+            sendJson(`/bikes/${id}/vote`, { method: 'POST' })
+              .then((updatedBike) => {
+                setData((current) => ({
+                  ...current,
+                  bikes: current.bikes.map((bike) => bike.id === id ? updatedBike : bike)
+                }));
+              })
+              .catch(() => {
+                setData((current) => ({
+                  ...current,
+                  bikes: current.bikes.map((bike) => bike.id === id ? { ...bike, votes: bike.votes + 1 } : bike)
+                }));
+              });
           }}
         />
         <Members members={data.members} />
@@ -161,13 +194,22 @@ function App() {
           auth={auth}
           onAttend={(id) => {
             if (!auth) return setAuthOpen(true);
-            setData((current) => ({
-              ...current,
-              events: current.events.map((event) => {
-                if (event.id !== id || event.attendees.includes(auth.user.nickname)) return event;
-                return { ...event, attendees: [...event.attendees, auth.user.nickname] };
+            sendJson(`/events/${id}/attend`, { method: 'POST', token: auth.token })
+              .then((updatedEvent) => {
+                setData((current) => ({
+                  ...current,
+                  events: current.events.map((event) => event.id === id ? updatedEvent : event)
+                }));
               })
-            }));
+              .catch(() => {
+                setData((current) => ({
+                  ...current,
+                  events: current.events.map((event) => {
+                    if (event.id !== id || event.attendees.includes(auth.user.nickname)) return event;
+                    return { ...event, attendees: [...event.attendees, auth.user.nickname] };
+                  })
+                }));
+              });
           }}
         />
         <Blog posts={data.posts} />
@@ -204,14 +246,20 @@ function App() {
           photo={editingPhoto}
           onClose={() => setEditingPhoto(null)}
           onSave={(updatedPhoto) => {
-            setData((current) => ({
-              ...current,
-              gallery: current.gallery.map((photo) => photo.id === updatedPhoto.id ? updatedPhoto : photo)
-            }));
-            setViewingPhoto((current) => current?.id === updatedPhoto.id ? updatedPhoto : current);
-            setEditingPhoto(null);
-            setNotice('Foto actualizada');
-            setTimeout(() => setNotice(''), 2600);
+            sendJson(`/gallery/${updatedPhoto.id}`, {
+              method: 'PATCH',
+              token: auth?.token,
+              body: JSON.stringify(updatedPhoto)
+            }).then((savedPhoto) => {
+              setData((current) => ({
+                ...current,
+                gallery: current.gallery.map((photo) => photo.id === savedPhoto.id ? savedPhoto : photo)
+              }));
+              setViewingPhoto((current) => current?.id === savedPhoto.id ? savedPhoto : current);
+              setEditingPhoto(null);
+              setNotice('Foto actualizada');
+              setTimeout(() => setNotice(''), 2600);
+            }).catch((error) => setNotice(error.message));
           }}
         />
       )}
@@ -221,13 +269,19 @@ function App() {
           route={editingRoute}
           onClose={() => setEditingRoute(null)}
           onSave={(updatedRoute) => {
-            setData((current) => ({
-              ...current,
-              routes: current.routes.map((route) => route.id === updatedRoute.id ? updatedRoute : route)
-            }));
-            setEditingRoute(null);
-            setNotice('Ruta actualizada');
-            setTimeout(() => setNotice(''), 2600);
+            sendJson(`/routes/${updatedRoute.id}`, {
+              method: 'PATCH',
+              token: auth?.token,
+              body: JSON.stringify(updatedRoute)
+            }).then((savedRoute) => {
+              setData((current) => ({
+                ...current,
+                routes: current.routes.map((route) => route.id === savedRoute.id ? savedRoute : route)
+              }));
+              setEditingRoute(null);
+              setNotice('Ruta actualizada');
+              setTimeout(() => setNotice(''), 2600);
+            }).catch((error) => setNotice(error.message));
           }}
         />
       )}
